@@ -466,7 +466,10 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']
 
     visdir_calib = proc_dir + 'slow_calib/'
-    caltable_folder = proc_dir + 'caltables/'
+    # gaintable_folder is where the intermediate gain tables are located
+    gaintable_folder = proc_dir + 'caltables/'
+    # caltable_folder is where the initial bandpass calibration tables are located 
+    caltable_folder = save_dir + 'caltables/'
     visdir_work = proc_dir + 'slow_working/'
     visdir_slfcaled = proc_dir + 'slow_slfcaled/'
     imagedir_allch = proc_dir + 'images_allch/'
@@ -488,8 +491,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     if not os.path.exists(visdir_slfcaled):
         os.makedirs(visdir_slfcaled)
 
-    if not os.path.exists(caltable_folder):
-        os.makedirs(caltable_folder)
+    if not os.path.exists(gaintable_folder):
+        os.makedirs(gaintable_folder)
 
     if not os.path.exists(flagdir):
         os.makedirs(flagdir)
@@ -556,7 +559,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             pool = multiprocessing.pool.Pool(processes=len(msfiles))
             #result = pool.map_async(run_calib, msfiles)
             run_calib_partial = partial(run_calib, msfiles_cal=msfiles_cal, bcal_tables=bcal_tables, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, 
-                    logger_file=logger_file, caltable_folder=caltable_folder, visdir_slfcaled=visdir_slfcaled, flagdir=flagdir)
+                    logger_file=logger_file, caltable_folder=gaintable_folder, visdir_slfcaled=visdir_slfcaled, flagdir=flagdir)
             result = pool.map_async(run_calib_partial, msfiles)
             timeout = 2000.
             result.wait(timeout=timeout)
@@ -601,7 +604,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     else:
                         logging.error('Nothing seems to work. I will abort and continue to the next time')
                         os.system('rm -rf '+ visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
-                        os.system('rm -rf '+ caltable_folder + '/' + timestr + '_*MHz*')
+                        os.system('rm -rf '+ gaintable_folder + '/' + timestr + '_*MHz*')
                         return False
 
             btime = Time(trange['begin']['m0']['value'], format='mjd')
@@ -627,12 +630,12 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         else:
             logging.error('For time {0:s}, less than 4 bands out of {1:d} bands were calibrated successfully. Abort....'.format(timestr, len(bands)))
             os.system('rm -rf '+ visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
-            os.system('rm -rf '+ caltable_folder + '/' + timestr + '_*MHz*')
+            os.system('rm -rf '+ gaintable_folder + '/' + timestr + '_*MHz*')
             return False
 
         if delete_ms_slfcaled:
             os.system('rm -rf '+ visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
-            os.system('rm -rf '+ caltable_folder + '/' + timestr + '_*MHz*')
+            os.system('rm -rf '+ gaintable_folder + '/' + timestr + '_*MHz*')
 
         if 'fitsfiles' in locals() and len(fitsfiles) > 1:
             ## define subdirectories for storing the fits and png files
@@ -825,7 +828,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
 if __name__=='__main__':
     """
     Main routine of running the realtime pipeline. Example call
-        pdsh -w lwacalim[00-09] 'conda activate suncasa && cd /fast/bin.chen/ && python /opt/devel/bin.chen/ovro-lwa-solar/solar_realtime_pipeline.py 2023-11-21T15:50'
+        pdsh -w lwacalim[00-09] 'conda activate suncasa && python /opt/devel/bin.chen/ovro-lwa-solar/operations/solar_realtime_pipeline.py 2023-11-21T15:50'
     Sometimes afer killing the pipeline (with ctrl c), one need to remove the temporary files and kill all the processes before restarting.
         pdsh -w lwacalim[00-09] 'rm -rf /fast/bin.chen/realtime_pipeline/slow_working/*'
         pdsh -w lwacalim[00-09] 'rm -rf /fast/bin.chen/realtime_pipeline/slow_slfcaled/*'
@@ -834,16 +837,28 @@ if __name__=='__main__':
     """
     parser = argparse.ArgumentParser(description='Solar realtime pipeline')
     parser.add_argument('prefix', type=str, help='Timestamp for the start time. Format YYYY-MM-DDTHH:MM')
-    parser.add_argument('--end_time', default=None, help='End time in format YYYY-MM-DDTHH:MM')
+    parser.add_argument('--end_time', default='2030-01-01T00:00', help='End time in format YYYY-MM-DDTHH:MM')
     parser.add_argument('--interval', default=600., help='Time interval in seconds')
     parser.add_argument('--nodes', default=10, help='Number of nodes to use')
     parser.add_argument('--delay', default=60, help='Delay from current time in seconds')
     parser.add_argument('--proc_dir', default='/fast/bin.chen/realtime_pipeline/', help='Directory for processing')
     parser.add_argument('--save_dir', default='/lustre/bin.chen/realtime_pipeline/', help='Directory for saving fits files')
-    parser.add_argument('--calib_file', default='20240117_145752', help='Calibration file to be used yyyymmdd_hhmmss')
+    parser.add_argument('--calib_file', default=None, help='Calibration file to be used yyyymmdd_hhmmss')
     parser.add_argument('--logger_file', default='/fast/bin.chen/realtime_pipeline/realtime_calib-imaging_parallel.log', help='Directory for saving fits files')
                         
     args = parser.parse_args()
+    if args.calib_file:
+        calib_file = args.calib_file
+    else:
+        logging.info('Calibration tables not provided. Attempting to find those from default location on lwacalim.')
+        calib_tables = glob.glob('/lustre/bin.chen/realtime_pipeline/caltables_latest/*.bcal')
+        if len(calib_tables) > 10:
+            calib_file = os.path.basename(calib_tables[0])[:15]
+            logging.info('Using calibration file {0:s}'.format(calib_file))
+        else:
+            logging.error('No calibration files found. Abort.')
+            sys.exit(0)
+
     try:
         run_pipeline(args.prefix, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=int(args.nodes), delay_from_now=float(args.delay),
                      proc_dir=args.proc_dir, save_dir=args.save_dir, calib_file=args.calib_file, logger_file=args.logger_file)
