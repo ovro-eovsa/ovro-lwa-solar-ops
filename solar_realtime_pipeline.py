@@ -843,14 +843,14 @@ if __name__=='__main__':
     parser.add_argument('--delay', default=60, help='Delay from current time in seconds')
     parser.add_argument('--proc_dir', default='/fast/bin.chen/realtime_pipeline/', help='Directory for processing')
     parser.add_argument('--save_dir', default='/lustre/bin.chen/realtime_pipeline/', help='Directory for saving fits files')
-    parser.add_argument('--calib_file', default=None, help='Calibration file to be used yyyymmdd_hhmmss')
+    parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
     parser.add_argument('--logger_file', default='/fast/bin.chen/realtime_pipeline/realtime_calib-imaging_parallel.log', help='Directory for saving fits files')
                         
     args = parser.parse_args()
-    if args.calib_file:
+    if len(args.calibfile) == 15:
         calib_file = args.calib_file
     else:
-        logging.info('Calibration tables not provided. Attempting to find those from default location on lwacalim.')
+        logging.info('Calibration tables not provided or recognized. Attempting to find those from default location on lwacalim.')
         calib_tables = glob.glob('/lustre/bin.chen/realtime_pipeline/caltables_latest/*.bcal')
         if len(calib_tables) > 10:
             calib_file = os.path.basename(calib_tables[0])[:15]
