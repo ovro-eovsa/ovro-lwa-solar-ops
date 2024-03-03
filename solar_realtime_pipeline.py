@@ -436,6 +436,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             logger_file=None, compress_fits=True,
             proc_dir = '/fast/bin.chen/realtime_pipeline/',
             save_dir = '/lustre/bin.chen/realtime_pipeline/',
+            calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
             calib_file = '20240117_145752',
             delete_working_ms=True):
     """
@@ -458,6 +459,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     :param compress_fits: if True, compress the fits (not loseless, reduce bitlen, but it's OK to do this in most of the cases of solar imaging) files after imaging
     :param proc_dir: directory to hold the working files
     :param save_dir: directory to hold the final products
+    :param calib_dir: directory to hold the initial bandpass calibration tables
     :param calib_file: calibration file to be used. Format yyyymmdd_hhmmss
     :param delete_working_ms: if True, delete the working ms files after imaging (set False for debugging purpose)
     """
@@ -465,11 +467,11 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     time_begin = timeit.default_timer() 
     bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']
 
-    visdir_calib = proc_dir + 'slow_calib/'
+    # caltable_folder is where the initial bandpass calibration tables are located 
+    caltable_folder = calib_dir
     # gaintable_folder is where the intermediate gain tables are located
     gaintable_folder = proc_dir + 'caltables/'
-    # caltable_folder is where the initial bandpass calibration tables are located 
-    caltable_folder = save_dir + 'caltables/'
+    visdir_calib = proc_dir + 'slow_calib/'
     visdir_work = proc_dir + 'slow_working/'
     visdir_slfcaled = proc_dir + 'slow_slfcaled/'
     imagedir_allch = proc_dir + 'images_allch/'
@@ -843,6 +845,7 @@ if __name__=='__main__':
     parser.add_argument('--delay', default=60, help='Delay from current time in seconds')
     parser.add_argument('--proc_dir', default='/fast/bin.chen/realtime_pipeline/', help='Directory for processing')
     parser.add_argument('--save_dir', default='/lustre/bin.chen/realtime_pipeline/', help='Directory for saving fits files')
+    parser.add_argument('--calib_dir', default='/lustre/bin.chen/realtime_pipeline/caltables/', help='Directory to calibration tables')
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
     parser.add_argument('--logger_file', default='/fast/bin.chen/realtime_pipeline/realtime_calib-imaging_parallel.log', help='Directory for saving fits files')
                         
