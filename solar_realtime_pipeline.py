@@ -416,7 +416,7 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12):
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         sclfactor = 1. / jones_matrices[0][0]
         helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun') 
-        default_wscleancmd = ("wsclean -j 4 -mem 2 -no-reorder -no-dirty -size 1024 1024 -scale 1arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
+        default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -size 1024 1024 -scale 1arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
                 helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size 1 -pol I -join-channels -channels-out " + str(nch_out) + ' ' + msfile_slfcaled)
  
         os.system(default_wscleancmd)
@@ -847,7 +847,7 @@ if __name__=='__main__':
     parser.add_argument('--logger_file', default='/fast/bin.chen/realtime_pipeline/realtime_calib-imaging_parallel.log', help='Directory for saving fits files')
                         
     args = parser.parse_args()
-    if len(args.calibfile) == 15:
+    if len(args.calib_file) == 15:
         calib_file = args.calib_file
     else:
         logging.info('Calibration tables not provided or recognized. Attempting to find those from default location on lwacalim.')
@@ -861,7 +861,7 @@ if __name__=='__main__':
 
     try:
         run_pipeline(args.prefix, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=int(args.nodes), delay_from_now=float(args.delay),
-                     proc_dir=args.proc_dir, save_dir=args.save_dir, calib_file=args.calib_file, logger_file=args.logger_file)
+                     proc_dir=args.proc_dir, save_dir=args.save_dir, calib_file=calib_file, logger_file=args.logger_file)
     except Exception as e:
         logging.error(e)
         raise e
