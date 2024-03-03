@@ -864,7 +864,7 @@ if __name__=='__main__':
 
     try:
         run_pipeline(args.prefix, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=int(args.nodes), delay_from_now=float(args.delay),
-                     proc_dir=args.proc_dir, save_dir=args.save_dir, calib_file=calib_file, logger_file=args.logger_file)
+                     proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, logger_file=args.logger_file)
     except Exception as e:
         logging.error(e)
         raise e
