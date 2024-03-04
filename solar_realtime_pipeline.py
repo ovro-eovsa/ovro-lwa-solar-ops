@@ -326,16 +326,16 @@ def gen_caltables(ms_calib, caltable_fold = '/lustre/bin.chen/realtime_pipeline/
             npol, nch, nant = flags.shape
             for exp_ant_id in exp_ant_ids:
                 flags[:, :, exp_ant_id] = True
-            num_ant_per_chan = nant - np.min(np.sum(flags, axis=2), axis=0)
-            bmcalfac_per_chan = num_ant_per_chan ** 2
+            num_ant_per_chan = nant - np.sum(flags, axis=2)
+            bmcalfac_per_chan = num_ant_per_chan ** 2.
             bmcalfac.append(bmcalfac_per_chan)
             tb.putcol('FLAG', flags)
             tb.close()
             bcaltbs_bm.append(bcaltb_bm)
 
-        bmcalfac = np.concatenate(bmcalfac)
+        bmcalfac = np.concatenate(bmcalfac, axis=1)
         # write channel frequencies and corresponding beam scaling factors into a csv file
-        df = pd.DataFrame({"chan_freqs":chan_freqs, "beam_calfac":bmcalfac})
+        df = pd.DataFrame({"chan_freqs":chan_freqs, "calfac_x":bmcalfac[0], "calfac_y":bmcalfac[1]})
         bcalfac_file = beam_caltable_fold + '/' + os.path.basename(bcaltb)[:15] + '_bmcalfac.csv'
         df.to_csv(bcalfac_file, index=False)
         return bcaltbs, bcaltbs_bm, bcalfac_file
@@ -748,6 +748,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         logger_file='/fast/bin.chen/realtime_pipeline/realtime_calib-imaging_parallel.log',
         proc_dir = '/fast/bin.chen/realtime_pipeline/',
         save_dir = '/lustre/bin.chen/realtime_pipeline/',
+        calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
         calib_file = '20240117_145752', delete_working_ms=True):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
@@ -804,7 +805,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             sleep(twait.sec + delay_from_now)
         logging.info('{0:s}: Start processing {1:s}'.format(socket.gethostname(), time_start.isot))
         res = pipeline_quick(time_start, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, server=server, file_path=file_path, 
-                delete_ms_slfcaled=delete_ms_slfcaled, logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_file=calib_file, 
+                delete_ms_slfcaled=delete_ms_slfcaled, logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, calib_file=calib_file, 
                 delete_working_ms=delete_working_ms)
         time2 = timeit.default_timer()
         if res:
