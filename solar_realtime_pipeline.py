@@ -260,7 +260,7 @@ def download_calibms(calib_time, download_fold = '/lustre/bin.chen/realtime_pipe
     """
     Function to download calibration ms files for all or selected bands based on a given time
     :param calib_time: time selected for generating the calibration tables. A string recognized by astropy Time format
-    :param download_fold: directory to hold the downloaded msfiles 
+    :param download_fold: directory to hold the downloaded ms files 
     :param bands: band selection. Default to use all 16 bands.
     """
     if type(calib_time) == str:
@@ -278,21 +278,32 @@ def download_calibms(calib_time, download_fold = '/lustre/bin.chen/realtime_pipe
     return ms_calib
 
 
-def gen_caltables(calib_in, caltable_fold = '/lustre/bin.chen/realtime_pipeline/caltables/',
-        bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger=True,
-        beam_caltable_fold = '/lustre/bin.chen/realtime_pipeline/caltables_beam/'):
+def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger=True, 
+        proc_dir='./',
     """
     Function to generate calibration tables for a list of calibration ms files
     :param calib_in: input used for calibration. This can be either a) a string of time stamp recognized by astropy.time.Time 
             or b) a specific list of ms files used for calibration
-    :param caltable_fold: directory to hold these calibration tables
     :param bcaltb: name of the calibration tables. Use the default if None
     :param uvrange: uv range to be used, default to '>10lambda'
     :param refant: reference antenna, default to '202'
     :param flag_outrigger: if True, flag all outrigger antennas. These would be used for beamforming.
-    :param beam_caltable_fold: directory to hold the calibration tables for beamforming (after flagging the outriggers).
+    :proc_dir: directory to process the data and hold output files.
     """
     import pandas as pd
+    download_fold = proc_dir + '/ms_calib/',
+    caltable_fold = proc_dir + '/caltables/',
+    beam_caltable_fold = proc_dir + '/caltables_beam/'):
+
+    if not os.path.exists(download_fold):
+        os.makedirs(download_fold)
+
+    if not os.path.exists(caltable_fold):
+        os.makedirs(caltable_fold)
+
+    if not os.path.exists(beam_caltable_fold):
+        os.makedirs(beam_caltable_fold)
+
     bcaltbs = []
     chan_freqs = []
     if type(calib_in) == list:
@@ -304,7 +315,7 @@ def gen_caltables(calib_in, caltable_fold = '/lustre/bin.chen/realtime_pipeline/
         except:
             print('The input time needs to be astropy.time.Time format. Abort...')
             return -1
-        ms_calib = download_calibms(calib_time, doflag=True)
+        ms_calib = download_calibms(calib_time, doflag=True, download_fold=download_fold)
     else:
         print('Input not recognized. Abort...')
         return -1
