@@ -38,9 +38,12 @@ qa = quanta()
 me = measures()
 tb = table()
 
-def sun_riseset(date=Time.now(), observatory='ovro'):
+def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
     '''
     Given a date in Time object, determine the sun rise and set time as viewed from OVRO
+    :param date: input time in astropy.time.Time format
+    :param observatory: name of the observatory recognized by astropy
+    :param altitude_limit: lower limit of altitude to consider. Default to 15 degrees.
     '''
     try:
         date_mjd = Time(date).mjd
@@ -51,14 +54,14 @@ def sun_riseset(date=Time.now(), observatory='ovro'):
     t0 = Time(int(date_mjd) + 13. / 24., format='mjd')
     sun_loc = get_body('sun', t0, location=obs)
     alt = sun_loc.transform_to(AltAz(obstime=t0, location=obs)).alt.degree
-    while alt < 10.:
+    while alt < altitude_limit:
         t0 += TimeDelta(60., format='sec')
         alt = sun_loc.transform_to(AltAz(obstime=t0, location=obs)).alt.degree
 
     t1 = Time(int(date_mjd) + 22. / 24., format='mjd')
     sun_loc = get_body('sun', t1, location=obs)
     alt = sun_loc.transform_to(AltAz(obstime=t1, location=obs)).alt.degree
-    while alt > 10.:
+    while alt > altitude_limit:
         t1 += TimeDelta(60., format='sec')
         alt = sun_loc.transform_to(AltAz(obstime=t1, location=obs)).alt.degree
 
@@ -256,7 +259,7 @@ def download_calibms(calib_time, download_fold = '/lustre/bin.chen/realtime_pipe
         bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
     """
     Function to download calibration ms files for all or selected bands based on a given time
-    :param calib_time: time selected for generating the calibration tables in astropy Time format
+    :param calib_time: time selected for generating the calibration tables. A string recognized by astropy Time format
     :param download_fold: directory to hold the downloaded msfiles 
     :param bands: band selection. Default to use all 16 bands.
     """
@@ -275,12 +278,13 @@ def download_calibms(calib_time, download_fold = '/lustre/bin.chen/realtime_pipe
     return ms_calib
 
 
-def gen_caltables(ms_calib, caltable_fold = '/lustre/bin.chen/realtime_pipeline/caltables/',
+def gen_caltables(calib_in, caltable_fold = '/lustre/bin.chen/realtime_pipeline/caltables/',
         bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger=True,
         beam_caltable_fold = '/lustre/bin.chen/realtime_pipeline/caltables_beam/'):
     """
     Function to generate calibration tables for a list of calibration ms files
-    :param ms_calib: list of ms files used for calibration
+    :param calib_in: input used for calibration. This can be either a) a string of time stamp recognized by astropy.time.Time 
+            or b) a specific list of ms files used for calibration
     :param caltable_fold: directory to hold these calibration tables
     :param bcaltb: name of the calibration tables. Use the default if None
     :param uvrange: uv range to be used, default to '>10lambda'
@@ -291,28 +295,46 @@ def gen_caltables(ms_calib, caltable_fold = '/lustre/bin.chen/realtime_pipeline/
     import pandas as pd
     bcaltbs = []
     chan_freqs = []
-    # TODO: somehow the parallel processing failed if flagging has run. I have no idea why. Returning to the slow serial processing.
-    #pool = multiprocessing.pool.Pool(processes=len(ms_calib))
-    #gen_calib_partial = partial(calibration.gen_calibration, uvrange=uvrange, caltable_fold=caltable_fold,
-    #                refant=refant)
-    #result = pool.map_async(gen_calib_partial, ms_calib)
-    #timeout = 2000.
-    #result.wait(timeout=timeout)
-    #bcaltbs = result.get()
-    #pool.close()
-    #pool.join()
-    for ms_calib_ in ms_calib:
+    if type(calib_in) == list:
+        calib_in.sort()
+        ms_calib = calib_in
+    elif type(calib_in) == str:
         try:
-            bcaltb = calibration.gen_calibration(ms_calib_, uvrange=uvrange, caltable_fold=caltable_fold, refant=refant)
-            msmd.open(ms_calib_)
-            chan_freqs.append(msmd.chanfreqs(0))
-            msmd.done()
-            bcaltbs.append(bcaltb)
-        except Exception as e:
-            print('Something is wrong when making calibrations for ', ms_calib_)
-            print(e)
+            calib_time = Time(calib_in)
+        except:
+            print('The input time needs to be astropy.time.Time format. Abort...')
+            return -1
+        ms_calib = download_calibms(calib_time, doflag=True)
+    else:
+        print('Input not recognized. Abort...')
+        return -1
+
+    if len(ms_calib) > 0:
+        # TODO: somehow the parallel processing failed if flagging has run. I have no idea why. Returning to the slow serial processing.
+        #pool = multiprocessing.pool.Pool(processes=len(ms_calib))
+        #gen_calib_partial = partial(calibration.gen_calibration, uvrange=uvrange, caltable_fold=caltable_fold,
+        #                refant=refant)
+        #result = pool.map_async(gen_calib_partial, ms_calib)
+        #timeout = 2000.
+        #result.wait(timeout=timeout)
+        #bcaltbs = result.get()
+        #pool.close()
+        #pool.join()
+        for ms_calib_ in ms_calib:
+            try:
+                bcaltb = calibration.gen_calibration(ms_calib_, uvrange=uvrange, caltable_fold=caltable_fold, refant=refant)
+                msmd.open(ms_calib_)
+                chan_freqs.append(msmd.chanfreqs(0))
+                msmd.done()
+                bcaltbs.append(bcaltb)
+            except Exception as e:
+                print('Something is wrong when making calibrations for ', ms_calib_)
+                print(e)
+        chan_freqs = np.concatenate(chan_freqs)
+    else:
+        print('The list of calibration ms files seems to be empty. Abort...')
+        return -1
         
-    chan_freqs = np.concatenate(chan_freqs)
 
     if flag_outrigger:
         core_ant_ids, exp_ant_ids = flagging.get_antids(ms_calib[0])
@@ -749,7 +771,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         proc_dir = '/fast/bin.chen/realtime_pipeline/',
         save_dir = '/lustre/bin.chen/realtime_pipeline/',
         calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
-        calib_file = '20240117_145752', delete_working_ms=True):
+        calib_file = '20240117_145752', altitude_limit=15., delete_working_ms=True):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -763,6 +785,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     :param nodes: number of nodes to be used. Default 10 (lwacalim[00-09])
     :param firstnodes: first node to be used. Default 0 (lwacalim00)
     :param calib_file: calibration file to be used. Format yyyymmdd_hhmmss
+    :param altitude_limit: lowest altitude to start the pipeline in degrees. Default to 15 deg.
     '''
     logging.basicConfig(filename=logger_file, filemode='at',
         format='%(asctime)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
@@ -781,7 +804,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         delay_by_node = 0. 
     #while time_start > t_rise and time_start < Time.now() - TimeDelta(15.,format='sec'): 
     # find out when the Sun is high enough in the sky
-    (t_rise, t_set) = sun_riseset(time_start)
+    (t_rise, t_set) = sun_riseset(time_start, altitude_limit=altitude_limit)
     if time_start < t_rise:
         twait = t_rise - time_start
         logging.info('{0:s}: Start time {1:s} is before sunrise. Wait for {2:.1f} hours to start.'.format(socket.gethostname(), time_start.isot, twait.value * 24.))
@@ -848,6 +871,7 @@ if __name__=='__main__':
     parser.add_argument('--save_dir', default='/lustre/bin.chen/realtime_pipeline/', help='Directory for saving fits files')
     parser.add_argument('--calib_dir', default='/lustre/bin.chen/realtime_pipeline/caltables/', help='Directory to calibration tables')
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
+    parser.add_argument('--alt_limit', default=15., help='Lowest solar altitude to start/end imaging')
     parser.add_argument('--logger_file', default='/fast/bin.chen/realtime_pipeline/realtime_calib-imaging_parallel.log', help='Directory for saving fits files')
                         
     args = parser.parse_args()
@@ -865,7 +889,8 @@ if __name__=='__main__':
 
     try:
         run_pipeline(args.prefix, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=int(args.nodes), delay_from_now=float(args.delay),
-                     proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, logger_file=args.logger_file)
+                     proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, altitude_limit=float(args.alt_limit), 
+                     logger_file=args.logger_file)
     except Exception as e:
         logging.error(e)
         raise e
