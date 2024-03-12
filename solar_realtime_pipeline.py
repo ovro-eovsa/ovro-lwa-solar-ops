@@ -279,7 +279,7 @@ def download_calibms(calib_time, download_fold = '/lustre/bin.chen/realtime_pipe
 
 
 def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger=True, 
-        proc_dir='./',
+        proc_dir='./'):
     """
     Function to generate calibration tables for a list of calibration ms files
     :param calib_in: input used for calibration. This can be either a) a string of time stamp recognized by astropy.time.Time 
@@ -293,7 +293,7 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
     import pandas as pd
     download_fold = proc_dir + '/ms_calib/',
     caltable_fold = proc_dir + '/caltables/',
-    beam_caltable_fold = proc_dir + '/caltables_beam/'):
+    beam_caltable_fold = proc_dir + '/caltables_beam/'
 
     if not os.path.exists(download_fold):
         os.makedirs(download_fold)
