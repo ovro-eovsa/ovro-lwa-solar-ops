@@ -728,7 +728,12 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     im = rmap_plt.imshow(axes=ax, cmap='hinodexrt')
                     rmap_plt.draw_limb(ls='-', color='w', alpha=0.5)
 
-                    bmaj,bmin,bpa = meta['cbmaj'][bd],meta['cbmin'][bd],meta['cbpa'][bd]
+                    if 'cbmaj' in meta:
+                        bmaj,bmin,bpa = meta['cbmaj'][bd],meta['cbmin'][bd],meta['cbpa'][bd]
+                    elif 'bmaj' in meta:
+                        bmaj,bmin,bpa = meta['bmaj'][bd],meta['bmin'][bd],meta['bpa'][bd]
+                    else:
+                        print('No beam information found.')
                     beam0 = Ellipse((-fov/2*0.75, -fov/2*0.75), bmaj*3600,
                             #bmin*3600, angle=(-bpa),  fc='None', lw=2, ec='w')
                             bmin*3600, angle=-(90.-bpa),  fc='None', lw=2, ec='w')
