@@ -31,6 +31,10 @@ from time import sleep
 import socket
 from matplotlib.patches import Ellipse
 import argparse
+
+from ovrolwasolar import visualization as ovis
+from ovrolwasolar import refraction_correction as orefr
+
 matplotlib.use('agg')
 
 msmd = msmetadata()
@@ -471,7 +475,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             save_dir = '/lustre/bin.chen/realtime_pipeline/',
             calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
             calib_file = '20240117_145752',
-            delete_working_ms=True):
+            delete_working_ms=True, delete_working_fits=True, do_refra=True):
     """
     Pipeline for processing and imaging slow visibility data
     :param time_start: start time of the visibility data to be processed
@@ -709,63 +713,19 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             fitsfiles_fch.sort()
             #ndfits.wrap(fitsfiles_fch, outfitsfile=fits_fch, docompress=compress_fits)
             ndfits.wrap(fitsfiles_fch, outfitsfile=fits_fch)
-            os.system('rm -rf '+imagedir_allch + '*')
+            if delete_working_fits:
+                os.system('rm -rf '+imagedir_allch + '*')
 
-            # Plot mfs images (1 image per subband)
-            fig = plt.figure(figsize=(15., 8.))
-            fov = 8000
-            gs = gridspec.GridSpec(3, 4, left=0.05, right=0.95, top=0.94, bottom=0.10, wspace=0.3, hspace=0.4)
-            meta, rdata = ndfits.read(fits_mfs)
-            freqs_mhz = meta['ref_cfreqs']/1e6
-            freqs_plt = [34.1, 38.7, 43.2, 47.8, 52.4, 57.0, 61.6, 66.2, 70.8, 75.4, 80.0, 84.5]
-            for i in range(12):
-                ax = fig.add_subplot(gs[i])
-                freq_plt = freqs_plt[i]
-                if np.min(np.abs(freqs_mhz - freq_plt)) < 2.:
-                    bd = np.argmin(np.abs(freqs_mhz - freq_plt)) 
-                    rmap_plt_ = smap.Map(np.squeeze(rdata[0, bd, :, :]/1e6), meta['header'])
-                    rmap_plt = pmX.Sunmap(rmap_plt_)
-                    im = rmap_plt.imshow(axes=ax, cmap='hinodexrt')
-                    rmap_plt.draw_limb(ls='-', color='w', alpha=0.5)
+            fch_for_plot = fits_mfs
+            if do_refra:
+                [px, py, com_x_fitted, com_y_fitted] = orefr.refraction_fit_param(fits_mfs)
+                fnamelv15 = fits_mfs.replace('.image.fits', '.lv15.fits')
+                orefr.save_refraction_fit_param(fits_mfs, fnamelv15, px, py, com_x_fitted, com_y_fitted)
+                fch_for_plot = fnamelv15
 
-                    if 'cbmaj' in meta:
-                        bmaj,bmin,bpa = meta['cbmaj'][bd],meta['cbmin'][bd],meta['cbpa'][bd]
-                    elif 'bmaj' in meta:
-                        bmaj,bmin,bpa = meta['bmaj'][bd],meta['bmin'][bd],meta['bpa'][bd]
-                    else:
-                        print('No beam information found.')
-                    beam0 = Ellipse((-fov/2*0.75, -fov/2*0.75), bmaj*3600,
-                            #bmin*3600, angle=(-bpa),  fc='None', lw=2, ec='w')
-                            bmin*3600, angle=-(90.-bpa),  fc='None', lw=2, ec='w')
-
-                    ax.add_artist(beam0)
-
-                    cbar = plt.colorbar(im)
-                    cbar.set_label(r'$T_B$ (MK)')
-                    freq_mhz = meta['ref_cfreqs'][bd]/1e6
-                    #ax.set_title('OVRO-LWA {0:.0f} MHz'.format(freq_mhz))
-                    ax.text(0.02, 0.98, '{0:.0f} MHz'.format(freq_mhz), color='w', ha='left', va='top', fontsize=12, transform=ax.transAxes)
-                else:
-                    coord = SkyCoord(0*u.arcsec, 0*u.arcsec, obstime=tref.isot, observer='earth', frame=frames.Helioprojective)
-                    header = smap.make_fitswcs_header(np.zeros((256, 256)), coord,
-                                           reference_pixel=[128, 128]*u.pixel,
-                                           scale=[60, 60]*u.arcsec/u.pixel,
-                                           telescope='OVRO-LWA', instrument='',
-                                           wavelength=freq_plt*1e6*u.Hz)
-                    empty_map_ = smap.Map(np.zeros((256, 256)), header)
-                    empty_map = pmX.Sunmap(empty_map_)
-                    im = empty_map.imshow(axes=ax, cmap='hinodexrt', vmin=0, vmax=1.)
-                    empty_map.draw_limb(ls='-', color='w', alpha=0.5)
-                    cbar = plt.colorbar(im)
-                    cbar.set_label(r'$T_B$ (MK)')
-                    ax.text(0.02, 0.98, '{0:.0f} MHz (no data)'.format(freq_plt), color='w', ha='left', va='top', fontsize=12, transform=ax.transAxes)
-                ax.set_xlim([-fov/2, fov/2])
-                ax.set_ylim([-fov/2, fov/2])
-            fig.suptitle('OVRO-LWA Images at ' + tref.isot[:-4], fontsize=15)
-            text1 = fig.text(0.01, 0.01, 'OVRO-LWA Solar Team (NJIT Solar Radio Group)', fontsize=12, ha='left', va='bottom')
-            text2 = fig.text(0.99, 0.01, 'OVRO Long Wavelength Array (Caltech)', fontsize=12, ha='right', va='bottom')
+            fig = ovis.slow_pipeline_default_plot(fch_for_plot, apply_refraction_corr=do_refra)
             fig.savefig(fig_mfs_dir_sub + '/' + os.path.basename(fits_mfs).replace('.image.fits', '.png'))
-            plt.close()
+
             time_completed= timeit.default_timer() 
             logging.debug('====All processing for time {0:s} is done in {1:.1f} minutes'.format(timestr, (time_completed-time_begin)/60.))
             return True
@@ -787,7 +747,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         proc_dir = '/fast/bin.chen/realtime_pipeline/',
         save_dir = '/lustre/bin.chen/realtime_pipeline/',
         calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
-        calib_file = '20240117_145752', altitude_limit=15., delete_working_ms=True):
+        calib_file = '20240117_145752', altitude_limit=15., delete_working_ms=True, do_refra=True, delete_working_fits=True):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -813,10 +773,12 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         logging.error(e)
         raise e
     logging.info('{0:s}: I am asked to start imaging for {1:s}'.format(socket.gethostname(), time_start.isot))
+
     if multinode:
         nodenum = int(socket.gethostname()[-2:])
         delay_by_node = (nodenum - firstnode) * (time_interval/nodes)
     else:
+        logging.info('{0:s}: I am running on a single node'.format(socket.gethostname()))
         delay_by_node = 0. 
     #while time_start > t_rise and time_start < Time.now() - TimeDelta(15.,format='sec'): 
     # find out when the Sun is high enough in the sky
@@ -845,7 +807,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         logging.info('{0:s}: Start processing {1:s}'.format(socket.gethostname(), time_start.isot))
         res = pipeline_quick(time_start, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, server=server, file_path=file_path, 
                 delete_ms_slfcaled=delete_ms_slfcaled, logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, calib_file=calib_file, 
-                delete_working_ms=delete_working_ms)
+                delete_working_ms=delete_working_ms, delete_working_fits=delete_working_fits, do_refra=do_refra)
         time2 = timeit.default_timer()
         if res:
             logging.info('{0:s}: Processing {1:s} was successful within {2:.1f}m'.format(socket.gethostname(), time_start.isot, (time2-time1)/60.))
@@ -888,8 +850,12 @@ if __name__=='__main__':
     parser.add_argument('--calib_dir', default='/lustre/bin.chen/realtime_pipeline/caltables/', help='Directory to calibration tables')
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
     parser.add_argument('--alt_limit', default=15., help='Lowest solar altitude to start/end imaging')
+    parser.add_argument('--do_refra', default=False, help='If True, do refraction correction', action='store_true')
+    parser.add_argument('--singlenode', default=False, help='If True, delay the start time by the node', action='store_true')
     parser.add_argument('--logger_file', default='/fast/bin.chen/realtime_pipeline/realtime_calib-imaging_parallel.log', help='Directory for saving fits files')
-                        
+    parser.add_argument('--keep_working_ms', default=False, help='If True, keep the working ms files after imaging', action='store_true')
+    parser.add_argument('--keep_working_fits', default=False, help='If True, keep the working fits files after imaging', action='store_true')   
+
     args = parser.parse_args()
     if len(args.calib_file) == 15:
         calib_file = args.calib_file
@@ -906,7 +872,8 @@ if __name__=='__main__':
     try:
         run_pipeline(args.prefix, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=int(args.nodes), delay_from_now=float(args.delay),
                      proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, altitude_limit=float(args.alt_limit), 
-                     logger_file=args.logger_file)
+                     logger_file=args.logger_file, do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
+                     delete_working_fits=(not args.keep_working_fits))
     except Exception as e:
         logging.error(e)
         raise e
