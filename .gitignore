@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# user test script
+test_run_rtp.sh
+
 # Distribution / packaging
 .Python
 build/
