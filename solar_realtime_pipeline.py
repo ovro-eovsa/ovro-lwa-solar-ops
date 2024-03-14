@@ -723,9 +723,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 orefr.save_refraction_fit_param(fits_mfs, fnamelv15, px, py, com_x_fitted, com_y_fitted)
                 fch_for_plot = fnamelv15
 
-            fig = ovis.slow_pipeline_default_plot(fch_for_plot)
-            fig.savefig(fig_mfs_dir_sub + '/' + os.path.basename(fits_mfs).replace('.image.fits', '.png'),
-                        apply_refraction_corr=do_refra)
+            fig = ovis.slow_pipeline_default_plot(fch_for_plot, apply_refraction_corr=do_refra)
+            fig.savefig(fig_mfs_dir_sub + '/' + os.path.basename(fits_mfs).replace('.image.fits', '.png'))
 
             time_completed= timeit.default_timer() 
             logging.debug('====All processing for time {0:s} is done in {1:.1f} minutes'.format(timestr, (time_completed-time_begin)/60.))
