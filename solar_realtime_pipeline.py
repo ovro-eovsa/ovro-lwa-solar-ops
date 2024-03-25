@@ -295,8 +295,9 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
     :param flag_outrigger: if True, flag all outrigger antennas. These would be used for beamforming.
     :proc_dir: directory to process the data and hold output files.
     """
-    download_fold = proc_dir + '/ms_calib/',
-    caltable_fold = proc_dir + '/caltables/',
+    import pandas as pd
+    download_fold = proc_dir + '/ms_calib/'
+    caltable_fold = proc_dir + '/caltables/'
     beam_caltable_fold = proc_dir + '/caltables_beam/'
 
     if not os.path.exists(download_fold):
