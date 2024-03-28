@@ -426,7 +426,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         return -1
 
 
-def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, stokes='I'):
+def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, stokes='I', beam_fit_size=2):
     blc = int(512 - 128)
     trc = int(512 + 128 - 1)
     region='box [ [ {0:d}pix , {1:d}pix] , [{2:d}pix, {3:d}pix ] ]'.format(blc, blc, trc, trc)
@@ -454,8 +454,8 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         sclfactor = 1. / jones_matrices[0][0]
         helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun') 
-        default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -size 1024 1024 -scale 1.5arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
-                helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size 2 -pol " + stokes + " -join-channels -channels-out " + str(nch_out) + ' ' + msfile_slfcaled)
+        default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
+                helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes + " -join-channels -channels-out " + str(nch_out) + ' ' + msfile_slfcaled)
  
         os.system(default_wscleancmd)
 
@@ -469,8 +469,151 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         #logging.error('{0:s}: Imaging for {1:s} failed'.format(socket.gethostname(), msfile_slfcaled))
         return -1
 
+
+def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/', overwrite=True, dointerp=False, interp_method='linear', max_dt=600.):
+    """
+    Function for doing daily refraction corrections based on level 1 fits files produced in a given solar day
+    :param date: format 'yyyy-mm-dd' or an astropy.time.Time object or an astropy.time.Time compatible string
+    :param save_dir: directory to save the data prodcuts. Need to have a substructure of lev1/yyyy/mm/dd for level 1 files, and lev15/yyyy/mm/dd for level 1.5 files
+    :param overwrite: if True, overwrite the existing level 1.5 and refraction coefficient csv file
+    :param interp: interpolation method used by scipy.interpolation.interp1d. Default to 'linear'
+    :param max_dt: maximum time difference to perform the interpolation in seconds
+    """
+    if isinstance(date, str):
+        try:
+            date0 = Time(date)
+        except:
+            print("Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
+    elif isinstance(date, Time):
+        date0 = date
+    else:
+        print("Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
+
+    # define output directories
+    fits_dir = save_dir + '/fits/'
+    fits_dir_lv10 = fits_dir + '/lev10/' 
+    fits_dir_lv15 = fits_dir + '/lev15/' 
+    hdf_dir = save_dir + '/hdf/'
+    hdf_dir_lv10 = hdf_dir + '/lev1/' 
+    hdf_dir_lv15 = hdf_dir + '/lev15/' 
+    fig_mfs_dir = save_dir + '/figs_mfs/'
+    fig_mfs_dir_lv10 = fig_mfs_dir + '/lev1/' 
+    fig_mfs_dir_lv15 = fig_mfs_dir + '/lev15/' 
+    fig_mfs_dir_synop = fig_mfs_dir + '/synop/' 
+    refra_dir = save_dir + '/refra/'
+
+    # Note the following reorganization is only for synoptic plots and refraction csv files
+    # if UT time is before 3 UT, assign it to the earlier date. 
+    datestr_synop = date0.isot.split('T')[0].replace('-','')
+
+    datedir0 = date0.isot.split('T')[0].replace('-','/')+'/'
+    date1 = date0 + TimeDelta(1., format='jd')
+    datedir1 = date1.isot.split('T')[0].replace('-','/')+'/'
+    fits_fch0_lv10 = glob.glob(save_dir + '/fits/lev1/' + datedir0 + '*fch*.fits')
+    fits_fch0_lv10.sort()
+    fits_fch1_lv10 = glob.glob(save_dir + '/fits/lev1/' + datedir1 + '*fch*.fits')
+    fits_fch1_lv10.sort()
+    # narrow down to all files between 13 UT and 03 UT of the second day 
+    fits_fch_lv10_all_ = fits_fch0_lv10 + fits_fch1_lv10
+    fits_fch_lv10_all = []
+
+
+    for f in fits_fch_lv10_all_:
+        datestr = os.path.basename(f).split('.')[2].split('T')[0]
+        timestr = os.path.basename(f).split('.')[2].split('T')[1][:-1]
+        datetimestr = datestr + 'T' + timestr[:2] + ':' + timestr[2:4] + ':' + timestr[4:]
+        if Time(datetimestr).mjd > Time(date0).mjd + 13./24.  and Time(datetimestr).mjd < Time(date1).mjd + 3./24.:
+            fits_fch_lv10_all.append(f)
+
+    fits_fch_lv10_all.sort()
+
+    refrafile = refra_dir + '/refra_coeff_' + datestr_synop + '.csv'
+    if os.path.exists(refrafile):
+        df = pd.read_csv(refrafile)
+    else:
+        print('Cannot find a refraction correction file in the designated directory. Make a new one from data.')  
+
+    for fits_fch_lv10 in fits_fch_lv10_all:
+        fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
+        print('processing fits '+fits_fch_lv10)
+        datestr = os.path.basename(fits_fch_lv10).split('.')[2].split('T')[0]
+        timestr = os.path.basename(fits_fch_lv10).split('.')[2].split('T')[1][:-1]
+        datetimestr = datestr + 'T' + timestr[:2] + ':' + timestr[2:4] + ':' + timestr[4:]
+        datedir = datestr.replace('-','/') + '/'
+        if not os.path.exists(fits_dir_lv15 + datedir):
+            os.makedirs(fits_dir_lv15 + datedir)
+        if not os.path.exists(hdf_dir_lv15 + datedir):
+            os.makedirs(hdf_dir_lv15 + datedir)
+        if not os.path.exists(fig_mfs_dir_lv15 + datedir):
+            os.makedirs(fig_mfs_dir_lv15 + datedir)
+        if not os.path.exists(fig_mfs_dir_synop + datedir):
+            os.makedirs(fig_mfs_dir_synop + datedir)
+
+        try:
+            meta, data = ndfits.read(fits_fch_lv10)
+            if 'df' in locals() and meta['header']['date-obs'][:19] in df.Time.values and not overwrite:
+                print('Refraction correction record for '+ meta['header']['date-obs'] + ' already exists. Continue')
+                continue
+            else:
+                refra_rec = orefr.refraction_fit_param(fits_fch_lv10, return_record=True)
+                fits_mfs_lv15 = fits_dir_lv15 + datedir + os.path.basename(fits_mfs_lv10.replace('.lev1_mfs', '.lev1.5_mfs'))
+                hdf_mfs_lv15 = hdf_dir_lv15 + datedir + os.path.basename(fits_mfs_lv15).replace('.fits', '.hdf')
+                fits_fch_lv15 = fits_dir_lv15 + datedir + os.path.basename(fits_fch_lv10.replace('.lev1_fch', '.lev1.5_fch'))
+                hdf_fch_lv15 = hdf_dir_lv15 + datedir + os.path.basename(fits_fch_lv15).replace('.fits', '.hdf')
+                figname_lv15 = os.path.basename(fits_mfs_lv15).replace('.fits', '.png')
+                if (not np.isnan(refra_rec['px0'])) and (not np.isnan(refra_rec['py0'])): 
+                    df_new = pd.DataFrame(refra_rec, index=[0])
+                    if 'df' in locals():
+                        if (refra_rec['Time'] in df['Time'].unique()):
+                            cols = list(df.columns)
+                            df.loc[df.Time.isin(df_new.Time), cols] = df_new[cols].values
+                            print('Refraction correction record for '+ refra_rec['Time'] + ' updated in '+ refrafile)
+                        else:
+                            df = pd.concat([df_new, df], ignore_index=True)
+                            df = df.sort_values(by='Time')
+                            df.to_csv(refrafile, index=False)
+                            print('Refraction correction record for '+ refra_rec['Time'] + ' added to '+ refrafile)
+                    else:
+                        df = df_new
+                        df.to_csv(refrafile, index=False)
+                        print('Refraction correction record for '+ refra_rec['Time'] + ' added to '+ refrafile)
+
+                    fits_mfs_lv15 = orefr.apply_refra_record(fits_mfs_lv10, refra_rec, fname_out=fits_mfs_lv15)
+                    if fits_mfs_lv15:
+                        utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
+                        fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
+                        fig.savefig(fig_mfs_dir_lv15 + datedir + figname_lv15)
+                        figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
+                        os.system('cp '+ fig_mfs_dir_lv15 + datedir + figname_lv15 + ' ' + fig_mfs_dir_synop + datedir + figname_synop)
+
+                        fits_fch_lv15 = orefr.apply_refra_record(fits_fch_lv10, refra_rec, fname_out=fits_fch_lv15)
+                        utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
+
+                else:
+                    print('Refraction correction failed for '+ datetimestr)
+                    if dointerp:
+                        print('Trying to interpolate from nearby times')
+                        fits_mfs_lv15 = orefr.apply_refra_record(fits_mfs_lv10, df, fname_out=fits_mfs_lv15, interp=interp_method, max_dt=max_dt)
+                        if fits_mfs_lv15:
+                            print('Succeeded and updating level 1.5 files, but be cautious!')
+                            utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
+                            fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
+                            fig.savefig(fig_mfs_dir_lv15 + datedir + figname_lv15)
+                            figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
+                            os.system('cp '+ fig_mfs_dir_lv15 + datedir + figname_lv15 + ' ' + fig_mfs_dir_synop + datedir + figname_synop)
+                            fits_fch_lv15 = orefr.apply_refra_record(fits_fch_lv10, df, fname_out=fits_fch_lv15, interp=interp_method, max_dt=max_dt)
+                            utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
+                        else:
+                            print('Interpolation failed')
+                            continue
+        except Exception as e:
+            logging.error(e)
+            logging.error('====Processing {0:s} failed'.format(fits_fch_lv10))
+
+
+
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 
-            min_nband=6, nch_out=12, stokes='I', do_selfcal=True, num_phase_cal=0, num_apcal=1, 
+            min_nband=6, nch_out=12, beam_fit_size=2, stokes='I', do_selfcal=True, num_phase_cal=0, num_apcal=1, 
             overwrite_ms=False, delete_ms_slfcaled=False, logger_file=None, compress_fits=True,
             proc_dir = '/fast/bin.chen/realtime_pipeline/',
             save_dir = '/lustre/bin.chen/realtime_pipeline/',
@@ -488,6 +631,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     :param min_nband: minimum number of bands to be processed. Will skip if less than that.
     :param calib_file: calibration file to be used. Format yyyymmdd_hhmmss
     :param nch_out: number of channels to be imaged
+    :param beam_fit_size: size of the beam area used for fitting to be passed to wsclean. See https://wsclean.readthedocs.io/en/v3.0/restoring_beam_size.html
     :param do_selfcal: if True, do selfcalibration
     :param num_phase_cal: number of phase calibration iterations
     :param num_apcal: number of amplitude calibration iterations
@@ -661,7 +805,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             tref = Time(tref_mjd, format='mjd')
             ephem = hf.read_horizons(tref, dur=1./60./24., observatory='OVRO_MMA')
             pool = multiprocessing.pool.Pool(processes=len(msfiles_slfcaled_success))
-            run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, nch_out=nch_out, stokes=stokes)
+            run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size)
             result = pool.map_async(run_imager_partial, msfiles_slfcaled_success)
             timeout = 200.
             result.wait(timeout=timeout)
@@ -753,11 +897,11 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             if delete_working_fits:
                 os.system('rm -rf '+imagedir_allch + '*')
 
-            fig = ovis.slow_pipeline_default_plot(fits_mfs)
+            fig, axes = ovis.slow_pipeline_default_plot(fits_mfs)
             figname_lv10 = os.path.basename(fits_mfs).replace('.fits', '.png')
             fig.savefig(fig_mfs_dir_sub_lv10 + '/' + figname_lv10)
             if do_refra:
-                [px, py, com_x_fitted, com_y_fitted] = orefr.refraction_fit_param(fits_fch)
+                px, py = orefr.refraction_fit_param(fits_fch)
                 if (not np.isnan(px).any()) and (not np.isnan(py).any()): 
                     refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
                     df_new = pd.DataFrame({"Time":btime.isot, "px0":px[0], "px1":px[1], "py0":py[0], "py1":py[1]}, index=[0])
@@ -775,27 +919,17 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                         df.to_csv(refrafile, index=False)
                         logging.info('Refraction correction record for '+ btime.isot + ' added to '+ refrafile)
 
-                    meta, data = ndfits.read(fits_mfs)
-                    freqs_arr = meta['ref_cfreqs'] # Hz
-                    com_x_fitted = px[0] * 1/freqs_arr**2 + px[1]
-                    com_y_fitted = py[0] * 1/freqs_arr**2 + py[1]
                     fits_mfs_lv15 = imagedir_allch_combined_sub_lv15 + os.path.basename(fits_mfs.replace('.lev1_mfs', '.lev1.5_mfs'))
-                    #orefr.save_refraction_fit_param(fits_mfs, fits_mfs_lv15, px, py, com_x_fitted, com_y_fitted)
-                    orefr.save_resample_align(fits_mfs, fits_mfs_lv15, px, py, com_x_fitted, com_y_fitted)
+                    fits_mfs_lv15 = orefr.apply_refra_coeff(fits_mfs, px, py, fname_out=fits_mfs_lv15)
                     hdf_mfs_lv15 = hdf_dir_sub_lv15 + os.path.basename(fits_mfs_lv15).replace('.fits', '.hdf')
                     utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
 
-                    meta, data = ndfits.read(fits_fch)
-                    freqs_arr = meta['ref_cfreqs'] # Hz
-                    com_x_fitted = px[0] * 1/freqs_arr**2 + px[1]
-                    com_y_fitted = py[0] * 1/freqs_arr**2 + py[1]
                     fits_fch_lv15 = imagedir_allch_combined_sub_lv15 + os.path.basename(fits_fch.replace('.lev1_fch', '.lev1.5_fch'))
-                    #orefr.save_refraction_fit_param(fits_fch, fits_fch_lv15, px, py, com_x_fitted, com_y_fitted)
-                    orefr.save_resample_align(fits_fch, fits_fch_lv15, px, py, com_x_fitted, com_y_fitted)
+                    fits_fch_lv15 = orefr.apply_refra_coeff(fits_fch, px, py, fname_out=fits_fch_lv15)
                     hdf_fch_lv15 = hdf_dir_sub_lv15 + os.path.basename(fits_fch_lv15).replace('.fits', '.hdf')
                     utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
 
-                    fig = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
+                    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
                     figname_lv15 = os.path.basename(fits_mfs_lv15).replace('.fits', '.png')
                     fig.savefig(fig_mfs_dir_sub_lv15 + '/' + figname_lv15)
                     figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
@@ -829,7 +963,9 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         proc_dir = '/fast/bin.chen/realtime_pipeline/',
         save_dir = '/lustre/bin.chen/realtime_pipeline/',
         calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
-        calib_file = '20240117_145752', altitude_limit=15., delete_working_ms=True, do_refra=True, delete_working_fits=True):
+        calib_file = '20240117_145752', altitude_limit=15., 
+        beam_fit_size = 2, 
+        delete_working_ms=True, do_refra=True, delete_working_fits=True):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -847,6 +983,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     :param firstnodes: first node to be used. Default 0 (lwacalim00)
     :param calib_file: calibration file to be used. Format yyyymmdd_hhmmss
     :param altitude_limit: lowest altitude to start the pipeline in degrees. Default to 15 deg.
+    :param beam_fit_size: size of the beam area used for fitting to be passed to wsclean. See https://wsclean.readthedocs.io/en/v3.0/restoring_beam_size.html
     '''
     try:
         time_start = Time(time_start)
@@ -902,7 +1039,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         logging.info('{0:s}: Start processing {1:s}'.format(socket.gethostname(), time_start.isot))
         res = pipeline_quick(time_start, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, server=server, lustre=lustre, file_path=file_path, 
                 delete_ms_slfcaled=delete_ms_slfcaled, logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, calib_file=calib_file, 
-                delete_working_ms=delete_working_ms, delete_working_fits=delete_working_fits, do_refra=do_refra)
+                delete_working_ms=delete_working_ms, delete_working_fits=delete_working_fits, do_refra=do_refra, beam_fit_size=beam_fit_size)
         time2 = timeit.default_timer()
         if res:
             logging.info('{0:s}: Processing {1:s} was successful within {2:.1f}m'.format(socket.gethostname(), time_start.isot, (time2-time1)/60.))
@@ -916,8 +1053,21 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
 
         if time_start > t_set:
             (t_rise_next, t_set_next) = sun_riseset(t_set + TimeDelta(6./24., format='jd'))
-            twait = t_rise_next - time_start
-            logging.info('{0:s}: Sun is setting. Done for the day. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
+            date_mjd = int(time_start.mjd)
+            if time_start.mjd - date_mjd < 4./24.:
+                date_synop = Time(time_start.mjd - 1., format='mjd').isot[:10]
+            else:
+                date_synop = Time(time_start.mjd, format='mjd').isot[:10]
+            
+            if int(socket.gethostname()[-2:]) == nodes-firstnode-1:
+                logging.info('{0:s}: Sun is setting. Done for the day. Doing refraction corrections for the full day.'.format(socket.gethostname())) 
+                daily_refra_correction(date_synop, save_dir=save_dir, overwrite=False, dointerp=True, interp_method='linear', max_dt=600.)
+                twait = t_rise_next - Time.now() 
+                logging.info('{0:s}: Refraction corrections done. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
+            else:
+                twait = t_rise_next - Time.now() 
+                logging.info('{0:s}: Sun is setting. Done for the day. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
+
             time_start += TimeDelta(twait.sec + 60. + delay_by_node, format='sec')
             t_rise = t_rise_next
             t_set = t_set_next
@@ -955,6 +1105,7 @@ if __name__=='__main__':
     parser.add_argument('--calib_dir', default='/lustre/bin.chen/realtime_pipeline/caltables/', help='Directory to calibration tables')
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
     parser.add_argument('--alt_limit', default=15., help='Lowest solar altitude to start/end imaging')
+    parser.add_argument('--bmfit_sz', default=2, help='Beam fitting size to be passed to wsclean')
     parser.add_argument('--do_refra', default=True, help='If True, do refraction correction', action='store_true')
     parser.add_argument('--singlenode', default=False, help='If True, delay the start time by the node', action='store_true')
     parser.add_argument('--logger_prefix', default='/lustre/bin.chen/realtime_pipeline/logs/solar_realtime_pipeline', help='Directory and prefix for logger file')
@@ -980,7 +1131,7 @@ if __name__=='__main__':
                      proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
                      altitude_limit=float(args.alt_limit), logger_prefix=args.logger_prefix, do_refra=args.do_refra, 
                      multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
-                     delete_working_fits=(not args.keep_working_fits))
+                     delete_working_fits=(not args.keep_working_fits), beam_fit_size=args.bmfit_sz)
     except Exception as e:
         logging.error(e)
         raise e
