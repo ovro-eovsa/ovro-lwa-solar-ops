@@ -454,7 +454,7 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         sclfactor = 1. / jones_matrices[0][0]
         helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun') 
-        default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon_mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
+        default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
                 helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes + " -join-channels -channels-out " + str(nch_out) + ' ' + msfile_slfcaled)
  
         os.system(default_wscleancmd)
@@ -551,7 +551,7 @@ def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/',
 
         try:
             meta, data = ndfits.read(fits_fch_lv10)
-            if 'df' in locals() and meta['header']['date-obs'] in df.Time.values and not overwrite:
+            if 'df' in locals() and meta['header']['date-obs'][:19] in df.Time.values and not overwrite:
                 print('Refraction correction record for '+ meta['header']['date-obs'] + ' already exists. Continue')
                 continue
             else:
@@ -567,6 +567,7 @@ def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/',
                         if (refra_rec['Time'] in df['Time'].unique()):
                             cols = list(df.columns)
                             df.loc[df.Time.isin(df_new.Time), cols] = df_new[cols].values
+                            print('Refraction correction record for '+ refra_rec['Time'] + ' updated in '+ refrafile)
                         else:
                             df = pd.concat([df_new, df], ignore_index=True)
                             df = df.sort_values(by='Time')
@@ -580,7 +581,7 @@ def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/',
                     fits_mfs_lv15 = orefr.apply_refra_record(fits_mfs_lv10, refra_rec, fname_out=fits_mfs_lv15)
                     if fits_mfs_lv15:
                         utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
-                        fig = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
+                        fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
                         fig.savefig(fig_mfs_dir_lv15 + datedir + figname_lv15)
                         figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
                         os.system('cp '+ fig_mfs_dir_lv15 + datedir + figname_lv15 + ' ' + fig_mfs_dir_synop + datedir + figname_synop)
@@ -596,7 +597,7 @@ def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/',
                         if fits_mfs_lv15:
                             print('Succeeded and updating level 1.5 files, but be cautious!')
                             utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
-                            fig = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
+                            fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
                             fig.savefig(fig_mfs_dir_lv15 + datedir + figname_lv15)
                             figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
                             os.system('cp '+ fig_mfs_dir_lv15 + datedir + figname_lv15 + ' ' + fig_mfs_dir_synop + datedir + figname_synop)
@@ -896,7 +897,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             if delete_working_fits:
                 os.system('rm -rf '+imagedir_allch + '*')
 
-            fig = ovis.slow_pipeline_default_plot(fits_mfs)
+            fig, axes = ovis.slow_pipeline_default_plot(fits_mfs)
             figname_lv10 = os.path.basename(fits_mfs).replace('.fits', '.png')
             fig.savefig(fig_mfs_dir_sub_lv10 + '/' + figname_lv10)
             if do_refra:
@@ -928,7 +929,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     hdf_fch_lv15 = hdf_dir_sub_lv15 + os.path.basename(fits_fch_lv15).replace('.fits', '.hdf')
                     utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
 
-                    fig = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
+                    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
                     figname_lv15 = os.path.basename(fits_mfs_lv15).replace('.fits', '.png')
                     fig.savefig(fig_mfs_dir_sub_lv15 + '/' + figname_lv15)
                     figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
