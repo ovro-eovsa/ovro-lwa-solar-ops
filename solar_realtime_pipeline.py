@@ -13,6 +13,7 @@ from ovrolwasolar import file_handler
 import logging
 import timeit
 import multiprocessing
+from multiprocessing import TimeoutError
 from astropy.time import Time, TimeDelta
 import astropy.units as u
 from sunpy.coordinates import frames
@@ -757,18 +758,26 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             run_calib_partial = partial(run_calib, msfiles_cal=msfiles_cal, bcal_tables=bcal_tables, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, 
                     logger_file=logger_file, caltable_folder=gaintable_folder, visdir_slfcaled=visdir_slfcaled, flagdir=flagdir)
             result = pool.map_async(run_calib_partial, msfiles)
-            timeout = 2000.
+            timeout = 1200.
             result.wait(timeout=timeout)
-            if result.ready():
+            #if result.ready():
+            #    time_cal2 = timeit.default_timer()
+            #    logging.debug('Calibration for all {0:d} bands is done in {1:.1f} s'.format(len(msfiles), time_cal2-time_cal1))
+            #else:
+            #    logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
+            #    logging.debug('Proceed anyway')
+            try:
+                msfiles_slfcaled = result.get(timeout)
                 time_cal2 = timeit.default_timer()
                 logging.debug('Calibration for all {0:d} bands is done in {1:.1f} s'.format(len(msfiles), time_cal2-time_cal1))
-            else:
+                pool.close()
+                pool.join()
+            except TimeoutError as e:
+                logging.error(e)
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
+                pool.terminate()
                 
-            msfiles_slfcaled = result.get()
-            pool.close()
-            pool.join()
             if delete_working_ms:
                 os.system('rm -rf '+ visdir_work + '/' + timestr + '*')
         else:
@@ -812,17 +821,26 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size)
             result = pool.map_async(run_imager_partial, msfiles_slfcaled_success)
             timeout = 200.
-            result.wait(timeout=timeout)
-            if result.ready():
+            #result.wait(timeout=timeout)
+            #if result.ready():
+            #    time_img2 = timeit.default_timer()
+            #    logging.debug('Imaging for all {0:d} bands is done in {1:.1f} s'.format(len(msfiles_slfcaled_success), time_img2-time_img1))
+            #else:
+            #    logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
+            #    logging.debug('Proceed anyway')
+
+            try:
+                fitsfiles = result.get(timeout)
                 time_img2 = timeit.default_timer()
                 logging.debug('Imaging for all {0:d} bands is done in {1:.1f} s'.format(len(msfiles_slfcaled_success), time_img2-time_img1))
-            else:
+                pool.close()
+                pool.join()
+            except TimeoutError as e:
+                logging.error(e)
                 logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
+                pool.terminate()
 
-            fitsfiles = result.get()
-            pool.close()
-            pool.join()
         else:
             logging.error('For time {0:s}, less than 4 bands out of {1:d} bands were calibrated successfully. Abort....'.format(timestr, len(bands)))
             os.system('rm -rf '+ visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
