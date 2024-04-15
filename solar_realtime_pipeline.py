@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-
+from signal import signal, SIGPIPE, SIG_DFL
+signal(SIGPIPE,SIG_DFL)
 import os, sys, glob, getopt
 from ovrolwasolar import solar_pipeline as sp
 from ovrolwasolar.primary_beam import analytic_beam as beam
@@ -470,12 +471,14 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         return -1
 
 
-def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/', overwrite=True, dointerp=False, interp_method='linear', max_dt=600.):
+def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/', overwrite=True, overbright=2e6,
+        dointerp=False, interp_method='linear', max_dt=600.):
     """
     Function for doing daily refraction corrections based on level 1 fits files produced in a given solar day
     :param date: format 'yyyy-mm-dd' or an astropy.time.Time object or an astropy.time.Time compatible string
     :param save_dir: directory to save the data prodcuts. Need to have a substructure of lev1/yyyy/mm/dd for level 1 files, and lev15/yyyy/mm/dd for level 1.5 files
     :param overwrite: if True, overwrite the existing level 1.5 and refraction coefficient csv file
+    :param overbright: peak brightness temperature exceeding this value (in Kelvin) will be excluded for fitting
     :param interp: interpolation method used by scipy.interpolation.interp1d. Default to 'linear'
     :param max_dt: maximum time difference to perform the interpolation in seconds
     """
@@ -555,7 +558,7 @@ def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/',
                 print('Refraction correction record for '+ meta['header']['date-obs'] + ' already exists. Continue')
                 continue
             else:
-                refra_rec = orefr.refraction_fit_param(fits_fch_lv10, return_record=True)
+                refra_rec = orefr.refraction_fit_param(fits_fch_lv10, return_record=True, overbright=overbright)
                 fits_mfs_lv15 = fits_dir_lv15 + datedir + os.path.basename(fits_mfs_lv10.replace('.lev1_mfs', '.lev1.5_mfs'))
                 hdf_mfs_lv15 = hdf_dir_lv15 + datedir + os.path.basename(fits_mfs_lv15).replace('.fits', '.hdf')
                 fits_fch_lv15 = fits_dir_lv15 + datedir + os.path.basename(fits_fch_lv10.replace('.lev1_fch', '.lev1.5_fch'))
@@ -619,7 +622,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             save_dir = '/lustre/bin.chen/realtime_pipeline/',
             calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
             calib_file = '20240117_145752',
-            delete_working_ms=True, delete_working_fits=True, do_refra=True):
+            delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6):
     """
     Pipeline for processing and imaging slow visibility data
     :param time_start: start time of the visibility data to be processed
@@ -644,6 +647,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     :param calib_dir: directory to hold the initial bandpass calibration tables
     :param calib_file: calibration file to be used. Format yyyymmdd_hhmmss
     :param delete_working_ms: if True, delete the working ms files after imaging (set False for debugging purpose)
+    :param overbright: peak brightness temperature exceeding this value (in Kelvin) will be excluded for refraction correction fitting
     """
 
     time_begin = timeit.default_timer() 
@@ -901,7 +905,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             figname_lv10 = os.path.basename(fits_mfs).replace('.fits', '.png')
             fig.savefig(fig_mfs_dir_sub_lv10 + '/' + figname_lv10)
             if do_refra:
-                px, py = orefr.refraction_fit_param(fits_fch)
+                px, py = orefr.refraction_fit_param(fits_fch, overbright=overbright)
                 if (not np.isnan(px).any()) and (not np.isnan(py).any()): 
                     refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
                     df_new = pd.DataFrame({"Time":btime.isot, "px0":px[0], "px1":px[1], "py0":py[0], "py1":py[1]}, index=[0])
@@ -958,8 +962,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
 
 def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay_from_now=180., do_selfcal=True, num_phase_cal=0, num_apcal=1, 
-        server=None, lustre=True, file_path='slow', multinode=True, nodes=10, firstnode=0, delete_ms_slfcaled=True, 
-        logger_prefix='/lustre/bin.chen/realtime_pipeline/logs/realtime_pipeline',
+        server=None, lustre=True, file_path='slow', multinode=True, nodes='0123456789', delete_ms_slfcaled=True, 
+        logger_dir = '/lustre/bin.chen/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
         proc_dir = '/fast/bin.chen/realtime_pipeline/',
         save_dir = '/lustre/bin.chen/realtime_pipeline/',
         calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
@@ -979,8 +983,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     :param delay_from_now: delay of the newest time to process compared to now.
     :param delete_ms_slfcaled: whether or not to delete the self-calibrated measurement sets.
     :param multinode: if True, will delay the start time by the node
-    :param nodes: number of nodes to be used. Default 10 (lwacalim[00-09])
-    :param firstnodes: first node to be used. Default 0 (lwacalim00)
+    :param nodes: list of lwacalim nodes to be used. Default '0123456789'
     :param calib_file: calibration file to be used. Format yyyymmdd_hhmmss
     :param altitude_limit: lowest altitude to start the pipeline in degrees. Default to 15 deg.
     :param beam_fit_size: size of the beam area used for fitting to be passed to wsclean. See https://wsclean.readthedocs.io/en/v3.0/restoring_beam_size.html
@@ -995,7 +998,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     # set up logging file
     server = socket.gethostname()
     datestr = Time(time_start.mjd, format='mjd').isot[:10].replace('-','')
-    logger_file = logger_prefix + '_' + datestr + '_' + server + '.log'  
+    datedir = Time(time_start.mjd, format='mjd').isot[:10].replace('-','/') + '/'
+    logger_file = logger_dir + datedir + logger_prefix + '_' + datestr + '_' + server + '.log'  
 
     if not os.path.exists(os.path.dirname(logger_file)):
         print('Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
@@ -1003,15 +1007,19 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
 
     logging.basicConfig(filename=logger_file, filemode='at',
         format='%(asctime)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
-        level=20,
+        level=logger_level,
         datefmt='%Y-%m-%d %H:%M:%S', force=True)
 
     logging.info('{0:s}: I am asked to start imaging for {1:s}'.format(socket.gethostname(), time_start.isot))
     if multinode:
         nodenum = int(socket.gethostname()[-2:])
-        delay_by_node = (nodenum - firstnode) * (time_interval/nodes)
+        nodes_list=[int(n) for n in list(nodes)]
+        nnode = len(nodes_list)
+        delay_by_node = nodes_list.index(nodenum) * (time_interval/nnode) 
     else:
         logging.info('{0:s}: I am running on a single node'.format(socket.gethostname()))
+        nodenum = int(socket.gethostname()[-2:])
+        nodes_list = [nodenum]
         delay_by_node = 0. 
     #while time_start > t_rise and time_start < Time.now() - TimeDelta(15.,format='sec'): 
     # find out when the Sun is high enough in the sky
@@ -1059,7 +1067,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             else:
                 date_synop = Time(time_start.mjd, format='mjd').isot[:10]
             
-            if int(socket.gethostname()[-2:]) == nodes-firstnode-1:
+            if int(socket.gethostname()[-2:]) == nodes_list[-1]:
                 logging.info('{0:s}: Sun is setting. Done for the day. Doing refraction corrections for the full day.'.format(socket.gethostname())) 
                 daily_refra_correction(date_synop, save_dir=save_dir, overwrite=False, dointerp=True, interp_method='linear', max_dt=600.)
                 twait = t_rise_next - Time.now() 
@@ -1073,10 +1081,16 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             t_set = t_set_next
             # updating the logger file
             datestr = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','')
-            logger_file = logger_prefix + '_' + datestr + '_' + server + '.log'  
+            datedir = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','/') + '/'
+            logger_file = logger_dir + datedir + logger_prefix + '_' + datestr + '_' + server + '.log'  
+
+            if not os.path.exists(os.path.dirname(logger_file)):
+                print('Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
+                os.makedirs(os.path.dirname(logger_file))
+
             logging.basicConfig(filename=logger_file, filemode='at',
                 format='%(asctime)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
-                level=20,
+                level=logger_level,
                 datefmt='%Y-%m-%d %H:%M:%S', force=True)
             sleep(twait.sec + 60. + delay_by_node)
 
@@ -1095,7 +1109,7 @@ if __name__=='__main__':
     parser.add_argument('prefix', type=str, help='Timestamp for the start time. Format YYYY-MM-DDTHH:MM')
     parser.add_argument('--end_time', default='2030-01-01T00:00', help='End time in format YYYY-MM-DDTHH:MM')
     parser.add_argument('--interval', default=600., help='Time interval in seconds')
-    parser.add_argument('--nodes', default=10, help='Number of nodes to use')
+    parser.add_argument('--nodes', default='0123456789', help='List of nodes to use')
     parser.add_argument('--delay', default=60, help='Delay from current time in seconds')
     parser.add_argument('--server', default=None, help='Name of the server where the raw data is located. Must be defined in ~/.ssh/config.')
     parser.add_argument('--nolustre', default=False, help='If set, do NOT assume that the data are stored under /lustre/pipeline/ in the default tree', action='store_true')
@@ -1108,7 +1122,9 @@ if __name__=='__main__':
     parser.add_argument('--bmfit_sz', default=2, help='Beam fitting size to be passed to wsclean')
     parser.add_argument('--do_refra', default=True, help='If True, do refraction correction', action='store_true')
     parser.add_argument('--singlenode', default=False, help='If True, delay the start time by the node', action='store_true')
-    parser.add_argument('--logger_prefix', default='/lustre/bin.chen/realtime_pipeline/logs/solar_realtime_pipeline', help='Directory and prefix for logger file')
+    parser.add_argument('--logger_dir', default='/lustre/bin.chen/realtime_pipeline/logs/', help='Directory for logger files')
+    parser.add_argument('--logger_prefix', default='solar_realtime_pipeline', help='Prefix for logger file')
+    parser.add_argument('--logger_level', default=10, help='Specify logging level. Default to 10 (debug)')   
     parser.add_argument('--keep_working_ms', default=False, help='If True, keep the working ms files after imaging', action='store_true')
     parser.add_argument('--keep_working_fits', default=False, help='If True, keep the working fits files after imaging', action='store_true')   
 
@@ -1126,10 +1142,10 @@ if __name__=='__main__':
             sys.exit(0)
 
     try:
-        run_pipeline(args.prefix, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=int(args.nodes), delay_from_now=float(args.delay),
+        run_pipeline(args.prefix, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=args.nodes, delay_from_now=float(args.delay),
                      server=args.server, lustre=(not args.nolustre), file_path=args.file_path,
                      proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
-                     altitude_limit=float(args.alt_limit), logger_prefix=args.logger_prefix, do_refra=args.do_refra, 
+                     altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), do_refra=args.do_refra, 
                      multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
                      delete_working_fits=(not args.keep_working_fits), beam_fit_size=args.bmfit_sz)
     except Exception as e:
