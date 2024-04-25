@@ -727,6 +727,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         msfiles0_freq = [f['freq'] for f in msfiles0]
         msfiles0_name = [f['name'] for f in msfiles0]
         timestr = msfiles0_name[0][:15]
+        
+        prev_calfiles=glob.glob(os.path.join(gaintable_folder,"*.gcal"))#### these files will be deleted in this cycle
+        
         msfiles_slfcaled = glob.glob(visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
         msfiles_slfcaled.sort()
         if len(msfiles_slfcaled) == 0 or overwrite_ms:
@@ -849,7 +852,12 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
         if delete_ms_slfcaled:
             os.system('rm -rf '+ visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
-            os.system('rm -rf '+ gaintable_folder + '/' + timestr + '_*MHz*')
+            for calfile in prev_calfiles:
+                #os.system('rm -rf '+ caltable_folder + '/' + timestr + '_*MHz*')
+                freq=os.path.basename(calfile).split('_')[2]
+                if len(glob.glob(os.path.join(gaintable_folder,timestr+"_"+freq+"*.gcal")))!=0:
+                    os.system('rm -rf '+calfile) ### I am only deleting the previous calfile and
+                                             ### and that also when this round has exited successfully.
 
         if 'fitsfiles' in locals() and len(fitsfiles) > 1:
             ## define subdirectories for storing the fits and png files
