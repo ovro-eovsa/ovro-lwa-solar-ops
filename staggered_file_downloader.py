@@ -9,7 +9,7 @@ import shlex, subprocess
 from casatasks import split
 import numpy as np
 
-def sun_riseset(date=Time.now(), observatory='ovro'):
+def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=10):
     '''
     Given a date in Time object, determine the sun rise and set time as viewed from OVRO
     '''
@@ -29,7 +29,7 @@ def sun_riseset(date=Time.now(), observatory='ovro'):
     t1 = Time(int(date_mjd) + 22. / 24., format='mjd')
     sun_loc = get_body('sun', t1, location=obs)
     alt = sun_loc.transform_to(AltAz(obstime=t1, location=obs)).alt.degree
-    while alt > 10.:
+    while alt > altitude_limit:
         t1 += TimeDelta(60., format='sec')
         alt = sun_loc.transform_to(AltAz(obstime=t1, location=obs)).alt.degree
 
