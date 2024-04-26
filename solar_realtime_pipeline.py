@@ -235,6 +235,9 @@ def download_msfiles(msfiles, destination='/fast/bin.chen/realtime_pipeline/slow
 
 def download_timerange(starttime, endtime, download_interval='1min', destination='/fast/bin.chen/20231027/slow/', 
                 server=None, lustre=True, file_path='slow', bands=None, verbose=True, maxthread=5):
+    '''
+    :param download_interval: If str should either be 10s, 1min or 10min. If integer should be in seconds.
+    '''
     time_bg = timeit.default_timer() 
     t_start = Time(starttime)
     t_end = Time(endtime)
@@ -245,11 +248,24 @@ def download_timerange(starttime, endtime, download_interval='1min', destination
 
     if download_interval == '10s':
         dt = TimeDelta(10., format='sec')
-    if download_interval == '1min':
+    elif download_interval == '1min':
         dt = TimeDelta(60., format='sec')
-    if download_interval == '10min':
+    elif download_interval == '10min':
         dt = TimeDelta(600., format='sec')
+    else:
+        try:
+            download_interval=int(download_interval)
+            if download_interval%10!=0:
+                logging.warning("Data is recorded with 10s cadence. Separation should be a multiple of 10."+\
+                                "Setting download interval to nearest multiple of 10")
+            dt=TimeDelta(download_interval,format='sec')
+        except Exception as e:
+            logging.error("download interval should either be 10s, 1min, 10min, or an integer in seconds")
+            print ("download interval should either be 10s, 1min, 10min, or an integer in seconds")
+            raise e
     nt = int(np.ceil((t_end - t_start) / dt))
+    if isinstance(download_interval, int):
+        download_interval=str(download_interval)+"s"
     print('====Will download {0:d} times at an interval of {1:s}===='.format(nt, download_interval))
     for i in range(nt):
         intime = t_start + i * dt
@@ -853,7 +869,6 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         if delete_ms_slfcaled:
             os.system('rm -rf '+ visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
             for calfile in prev_calfiles:
-                #os.system('rm -rf '+ caltable_folder + '/' + timestr + '_*MHz*')
                 freq=os.path.basename(calfile).split('_')[2]
                 if len(glob.glob(os.path.join(gaintable_folder,timestr+"_"+freq+"*.gcal")))!=0:
                     os.system('rm -rf '+calfile) ### I am only deleting the previous calfile and
