@@ -812,10 +812,6 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             print('==Copying file over to working directory==')
             logging.debug('====Copying file over to working directory====')
             time1 = timeit.default_timer()
-            #msfiles = []
-            #for msfile0 in msfiles0:
-            #    os.system('cp -r '+ msfile0 + ' ' + visdir_work + '/')
-            #    msfiles.append(visdir_work + '/' + os.path.basename(msfile0))
             msfiles = download_msfiles(msfiles0, destination=visdir_work, bands=bands)
             time2 = timeit.default_timer()
             logging.debug('Time taken to copy files is {0:.1f} s'.format(time2-time1))
@@ -897,7 +893,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                                 os.system('rm -rf '+ gaintable_folder + '/' + timestr1 + '_*'+freqstr+'*')
                         return False
             fast_vis=check_fast_ms(msfiles_slfcaled[0])
-            print ("fast_vis ",fast_vis)
+
             if do_imaging:
                 if fast_vis:
                     nch_out=1
@@ -966,9 +962,10 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                         if do_refra:
                             refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
                             logging.info("Trying to do refraction correction")
+
                             refra_image,success=do_refraction_correction(fits_images, overbright, \
                                                         refrafile, datedir, imagedir_allch_combined, hdf_dir, \
-                                                        fig_mfs_dir)
+                                                        fig_mfs_dir,btime)
                             if not success:
                                 logging.info('Refraction correction failed for '+ btime.isot)
                                 figname_to_copy=plotted_image
@@ -1126,8 +1123,8 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
         return [fits_mfs], os.path.join(fig_mfs_dir_sub_lv10, figname_lv10)
     
 def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir_allch_combined, hdf_dir, \
-                            fig_mfs_dir):
-                            
+                            fig_mfs_dir, image_time):
+    btime=image_time                        
     imagedir_allch_combined_sub_lv15 = imagedir_allch_combined + '/lev15/' + datedir
     hdf_dir_sub_lv15 = hdf_dir + '/lev15/' + datedir
     fig_mfs_dir_sub_lv15 = fig_mfs_dir + '/lev15/' + datedir
@@ -1143,9 +1140,9 @@ def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir
    
     print ("directories made")
     fits_mfs,fits_fch=fitsfiles
-    print (fits_fch)
+
     px, py = orefr.refraction_fit_param(fits_fch, overbright=overbright)
-    print (px,py)
+
     if (not np.isnan(px).any()) and (not np.isnan(py).any()): 
         df_new = pd.DataFrame({"Time":btime.isot, "px0":px[0], "px1":px[1], "py0":py[0], "py1":py[1]}, index=[0])
         print (refrafile)
