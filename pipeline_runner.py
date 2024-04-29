@@ -66,7 +66,7 @@ try:
                     logger_level=int(args.logger_level), do_refra=args.do_refra, 
                     multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
                     delete_working_fits=(not args.keep_working_fits), beam_fit_size=args.bmfit_sz, do_selfcal=(not args.no_selfcal),\
-                    do_imaging=(not args.no_imaging))
+                    do_imaging=(not args.no_imaging), bands=args.bands)
 except Exception as e:
     logging.error(e)
     raise e

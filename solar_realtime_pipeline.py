@@ -446,6 +446,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
     #### Generate calibrations ####
     imagename = os.path.basename(msfile)[:-3]+'_sun_selfcal'
     
+    fast_vis=check_fast_ms(msfile)
     if not do_selfcal:
         gaintables = get_selfcal_table_to_apply(msfile,caltable_folder)
     if len(bcal_tables_) > 0:
@@ -460,7 +461,8 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
                                         imagename=imagename, logging_level='info', \
                                         num_phase_cal=num_phase_cal, num_apcal=num_apcal,
                                         logfile=logger_file, caltable_folder=caltable_folder, \
-                                        do_final_imaging=False, do_fluxscaling=False, freqbin=1)
+                                        do_final_imaging=False, do_fluxscaling=False, freqbin=1, \
+                                        fast_vis=fast_vis)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
             if os.path.exists(msfile.replace('.ms', '.badants')):
                 os.system('cp '+ msfile.replace('.ms', '.badants') + ' ' + flagdir + '/')
@@ -516,8 +518,12 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         sclfactor = 1. / jones_matrices[0][0]
         helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun') 
-        default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
+        if nch_out>1:
+            default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
                 helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes + " -join-channels -channels-out " + str(nch_out) + ' ' + msfile_slfcaled)
+        else:
+            default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
+                helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes + ' ' + msfile_slfcaled)
  
         os.system(default_wscleancmd)
 
@@ -715,15 +721,17 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
     time_begin = timeit.default_timer() 
     
+    if file_path[-1]=='/':
+        file_path=file_path[:-1]
 
     # caltable_folder is where the initial bandpass calibration tables are located 
     caltable_folder = calib_dir
     # gaintable_folder is where the intermediate gain tables are located
     gaintable_folder = proc_dir + '/caltables/'
-    visdir_calib = proc_dir + '/slow_calib/'
-    visdir_work = proc_dir + '/slow_working/'
-    visdir_slfcaled = proc_dir + '/slow_slfcaled/'
-    imagedir_allch = proc_dir + '/images_allch/'
+    visdir_calib = proc_dir + '/'+file_path+'_slow_calib/'
+    visdir_work = proc_dir + '/'+file_path+'_working/'
+    visdir_slfcaled = proc_dir + '/'+file_path+'_slfcaled/'
+    imagedir_allch = proc_dir + '/'+file_path+'_images_allch/'
     flagdir = save_dir + '/flags/'
     refradir = save_dir + '/refra/'
 
@@ -866,7 +874,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         for m in msfiles_slfcaled:
             if type(m) is str:
                 msfiles_slfcaled_success.append(m)
-        if sum(success) > min(4,len(bands)):
+        if sum(success) > min(4,len(bands)-1):
             logging.info('{0:s}: Successfuly selfcalibrated {1:d} out of {2:d} bands'.format(socket.gethostname(), len(msfiles_slfcaled_success), len(bands)))
             time_img1 = timeit.default_timer()
             for i, m in enumerate(msfiles_slfcaled_success):
@@ -888,7 +896,11 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                             if do_selfcal:
                                 os.system('rm -rf '+ gaintable_folder + '/' + timestr1 + '_*'+freqstr+'*')
                         return False
+            fast_vis=check_fast_ms(msfiles_slfcaled[0])
+            print ("fast_vis ",fast_vis)
             if do_imaging:
+                if fast_vis:
+                    nch_out=1
                 fitsfiles=image_times(msfiles_slfcaled,imagedir_allch, nch_out=nch_out, \
                                    stokes=stokes, beam_fit_size=beam_fit_size)
             btime = Time(trange['begin']['m0']['value'], format='mjd')
@@ -923,7 +935,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     pass
         
         if 'fitsfiles' in locals():
-            if len(fitsfiles[0]) > 1:
+            if (len(fitsfiles[0]) > 1 and not fast_vis) or (fast_vis and len(fitsfiles[0]) >= 1):
                 datedir = btime.isot[:10].replace('-','/')+'/'
                 
                 # Note the following reorganization is only for synoptic plots and refraction csv files
@@ -942,35 +954,36 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 if not os.path.exists(fig_mfs_dir_sub_synop):
                     os.makedirs(fig_mfs_dir_sub_synop)
                     
-                
+                print ("fast_vis compression:",fast_vis)
                 fits_images,plotted_image=compress_plot_images(fitsfiles, btime, datedir, imagedir_allch_combined, hdf_dir, \
-                                        fig_mfs_dir, stokes)
+                                        fig_mfs_dir, stokes, fast_vis=fast_vis)
                 
                 logging.info("Level 1 images plotted ok")
                 figname_to_copy=None
                 
-                if len(fits_images)==2:  #### 0  is mfs, 1 in fine channel
-                    if do_refra:
-                        refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
-                        logging.info("Trying to do refraction correction")
-                        refra_image,success=do_refraction_correction(fits_images, overbright, \
-                                                    refrafile, datedir, imagedir_allch_combined, hdf_dir, \
-                                                    fig_mfs_dir)
-                        if not success:
-                            logging.info('Refraction correction failed for '+ btime.isot)
-                            figname_to_copy=plotted_image
-                            figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs_10s.', '.synop_mfs_10s.')    
-                        else:
-                            figname_to_copy=refra_image
-                            figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
-                  
-                if not figname_to_copy:
-                    figname_to_copy=plotted_image
-                    figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
-                
-                synoptic_image=os.path.join(fig_mfs_dir_sub_synop, figname_synop)    
-                
-                os.system('cp '+ figname_to_copy + ' ' + synoptic_image)   
+                if not fast_vis:    
+                    if len(fits_images)==2:  #### 0  is mfs, 1 in fine channel
+                        if do_refra:
+                            refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
+                            logging.info("Trying to do refraction correction")
+                            refra_image,success=do_refraction_correction(fits_images, overbright, \
+                                                        refrafile, datedir, imagedir_allch_combined, hdf_dir, \
+                                                        fig_mfs_dir)
+                            if not success:
+                                logging.info('Refraction correction failed for '+ btime.isot)
+                                figname_to_copy=plotted_image
+                                figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs_10s.', '.synop_mfs_10s.')    
+                            else:
+                                figname_to_copy=refra_image
+                                figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
+                      
+                    if not figname_to_copy:
+                        figname_to_copy=plotted_image
+                        figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
+                    
+                    synoptic_image=os.path.join(fig_mfs_dir_sub_synop, figname_synop)    
+                    
+                    os.system('cp '+ figname_to_copy + ' ' + synoptic_image)   
                 
                 if delete_working_fits:
                     os.system('rm -rf '+imagedir_allch + '*')
@@ -1059,25 +1072,35 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
 
     ## Wrap images
     timestr_iso = btime.isot[:-4].replace(':','')+'Z'
+    
+    
+    
+    
     # multi-frequency synthesis images
     fits_mfs = imagedir_allch_combined_sub_lv10 + '/ovro-lwa.lev1_mfs_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
     #fitsfiles_mfs = glob.glob(imagedir_allch + '/' + timestr+ '*MFS-image.fits')
     fitsfiles_mfs = []
     for f in fitsfiles:
+
         if type(f) is list:
-            if 'MFS' in f[-1]:
+            if 'MFS' in f[-1] and (not fast_vis):
                 fitsfiles_mfs.append(f[-1])
+            elif fast_vis:
+                fitsfiles_mfs+=f
+             
         else:
             continue
+    
     fitsfiles_mfs.sort()
+    
     ndfits.wrap(fitsfiles_mfs, outfitsfile=fits_mfs)
+    
     hdf_mfs = hdf_dir_sub_lv10 + os.path.basename(fits_mfs).replace('.fits', '.hdf')
-    utils.compress_fits_to_h5(fits_mfs, hdf_mfs)
+    #utils.compress_fits_to_h5(fits_mfs, hdf_mfs)
     
     if not fast_vis:
         # fine channel spectral images
         fits_fch = imagedir_allch_combined_sub_lv10 + '/ovro-lwa.lev1_fch_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
-        #fitsfiles_fch = list(set(glob.glob(imagedir_allch + '/' + timestr + '*-image.fits'))-set(glob.glob(imagedir_allch + '/' + timestr + '*MFS-image.fits')))
         fitsfiles_fch = []
         for f in fitsfiles:
             if type(f) is list:
@@ -1087,7 +1110,9 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
         fitsfiles_fch.sort()
         ndfits.wrap(fitsfiles_fch, outfitsfile=fits_fch)
         hdf_fch = hdf_dir_sub_lv10 + os.path.basename(fits_fch).replace('.fits', '.hdf')
-        utils.compress_fits_to_h5(fits_fch, hdf_fch)
+        #utils.compress_fits_to_h5(fits_fch, hdf_fch)
+        
+        
     
     
     fig, axes = ovis.slow_pipeline_default_plot(fits_mfs)
@@ -1162,7 +1187,7 @@ def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir
         
 
 def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay_from_now=180., do_selfcal=True, num_phase_cal=0, num_apcal=1, 
-        server=None, lustre=True, file_path='slow', multinode=True, nodes='0123456789', delete_ms_slfcaled=False, 
+        server=None, lustre=True, file_path='slow', multinode=True, nodes='0123456789', delete_ms_slfcaled=True, 
         logger_dir = '/lustre/bin.chen/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
         proc_dir = '/fast/bin.chen/realtime_pipeline/',
         save_dir = '/lustre/bin.chen/realtime_pipeline/',
@@ -1170,7 +1195,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         calib_file = '20240117_145752', altitude_limit=15., 
         beam_fit_size = 2, 
         delete_working_ms=True, do_refra=True, delete_working_fits=True,
-        do_imaging=True):
+        do_imaging=True,
+        bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -1195,13 +1221,17 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     except Exception as e:
         logging.error(e)
         raise e
-
+    
+    if file_path[-1]=='/':
+        file_path=file_path[:-1]
+        
     (t_rise, t_set) = sun_riseset(time_start, altitude_limit=altitude_limit)
     # set up logging file
     server = socket.gethostname()
     datestr = Time(time_start.mjd, format='mjd').isot[:10].replace('-','')
     datedir = Time(time_start.mjd, format='mjd').isot[:10].replace('-','/') + '/'
-    logger_file = logger_dir + datedir + logger_prefix + '_' + datestr + '_' + server + '.log'  
+    
+    logger_file = logger_dir + datedir + logger_prefix + '_' + file_path+ '_'+ datestr + '_' + server + '.log'  
 
     if not os.path.exists(os.path.dirname(logger_file)):
         print('Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
@@ -1252,7 +1282,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                             logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, \
                             calib_file=calib_file, delete_working_ms=delete_working_ms,\
                             delete_working_fits=delete_working_fits, do_refra=do_refra, \
-                            beam_fit_size=beam_fit_size, do_imaging=do_imaging)
+                            beam_fit_size=beam_fit_size, do_imaging=do_imaging, bands=bands)
         time2 = timeit.default_timer()
         if res:
             logging.info('{0:s}: Processing {1:s} was successful within {2:.1f}m'.format(socket.gethostname(), time_start.isot, (time2-time1)/60.))
