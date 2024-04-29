@@ -76,8 +76,7 @@ def download_msfiles(msfiles, destination='/fast/bin.chen/20231014_eclipse/slow_
     if verbose:
         print('Downloading {0:d} files took in {1:.1f} s'.format(nfile, time_completed-time_bg))
     omsfiles = [destination + n for n in omsfiles_name]
-    for msfile in omsfiles:
-    	outputvis=msfile.replace('.ms','_4chan_avg.ms')
+    
     return omsfiles
     
         
