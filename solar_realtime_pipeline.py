@@ -735,9 +735,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     flagdir = save_dir + '/flags/'
     refradir = save_dir + '/refra/'
 
-    imagedir_allch_combined = save_dir + '/fits/'
-    hdf_dir = save_dir + '/hdf/'
-    fig_mfs_dir = save_dir + '/figs_mfs/'
+    imagedir_allch_combined = save_dir + '/'+file_path+'_fits/'
+    hdf_dir = save_dir + '/'+ file_path+'_hdf/'
+    fig_mfs_dir = save_dir + '/'+ file_path+'_figs_mfs/'
 
     ## Night-time MS files used for calibration ##
     msfiles_cal = glob.glob(visdir_calib + calib_file + '_*MHz.ms')
