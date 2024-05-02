@@ -777,6 +777,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
                 pool.terminate()
+                pool.close()
                 
             if delete_working_ms:
                 os.system('rm -rf '+ visdir_work + '/' + timestr + '*')
@@ -840,6 +841,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
                 pool.terminate()
+                pool.close()
 
         else:
             logging.error('For time {0:s}, less than 4 bands out of {1:d} bands were calibrated successfully. Abort....'.format(timestr, len(bands)))
@@ -1062,6 +1064,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             twait = time_start - Time.now()
             logging.info('{0:s}: Start time {1:s} is too close to current time. Wait {2:.1f} m to start.'.format(socket.gethostname(), time_start.isot, (twait.sec + delay_from_now) / 60.))
             sleep(twait.sec + delay_from_now)
+            time1 = timeit.default_timer()
         logging.info('{0:s}: Start processing {1:s}'.format(socket.gethostname(), time_start.isot))
         res = pipeline_quick(time_start, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, server=server, lustre=lustre, file_path=file_path, 
                 delete_ms_slfcaled=delete_ms_slfcaled, logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, calib_file=calib_file, 
