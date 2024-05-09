@@ -868,7 +868,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 pool.terminate()
                 pool.close()
                 pool.join()
-#                time.sleep(10)
+
             if delete_working_ms:
                 for file1 in msfiles0_name:
                     timestr1 = utils.get_timestr_from_name(file1)
