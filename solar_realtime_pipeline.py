@@ -859,8 +859,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 logging.debug('Proceed anyway')
                 username=os.getlogin()
                 process_id=os.getpgid(0)
-                os.system("pdsh -w lwacalim[01-09] 'pkill -u "+username+ " "+"-g "+str(process_id)+" -f wsclean'")
-                pool.terminate()
+                #os.system("pdsh -w lwacalim[01-09] 'pkill -u "+username+ " "+"-g "+str(process_id)+" -f wsclean'")
+                #pool.terminate()
                 pool.close()
                 pool.join()
 
