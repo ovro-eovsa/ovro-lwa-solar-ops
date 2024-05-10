@@ -27,7 +27,7 @@ import sunpy.map as smap
 import shlex, subprocess
 from functools import partial
 from time import sleep
-import socket
+import socket,glob
 from matplotlib.patches import Ellipse
 import argparse
 import pandas as pd
@@ -451,20 +451,15 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         gaintables = get_selfcal_table_to_apply(msfile,caltable_folder)
     if len(bcal_tables_) > 0:
         bcal_table = [bcal_tables_[0]]
-        fast_bcal_table=glob.glob(bcal_table[0]+".fast")
         print('Found calibration table {0:s}'.format(bcal_table[0]))
         if not do_selfcal:
             for cal in gaintables:
                 bcal_table.append(cal)
         
         msfile_cal = None
-        if fast_vis:
-            if len(msfile_cal_)==0 and len(fast_bcal_table)==0:
-                raise RuntimeError("Either fast caltable or slow_ms is needed for fast vis calibration")
-            elif len(msfile_cal_)!=0:
-                msfile_cal=msfile_cal_[0]
+        
         try:
-            outms, tmp = sp.image_ms_quick(msfile, calib_ms=msfile_cal, bcal=bcal_table, do_selfcal=do_selfcal,\
+            outms, tmp = sp.image_ms_quick(msfile, calib_ms=None, bcal=bcal_table, do_selfcal=do_selfcal,\
                                         imagename=imagename, logging_level='info', \
                                         num_phase_cal=num_phase_cal, num_apcal=num_apcal,
                                         logfile=logger_file, caltable_folder=caltable_folder, \
