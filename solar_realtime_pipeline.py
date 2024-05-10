@@ -27,7 +27,7 @@ import sunpy.map as smap
 import shlex, subprocess
 from functools import partial
 from time import sleep
-import socket
+import socket,glob
 from matplotlib.patches import Ellipse
 import argparse
 import pandas as pd
@@ -456,6 +456,8 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
             for cal in gaintables:
                 bcal_table.append(cal)
         
+        msfile_cal = None
+        
         try:
             outms, tmp = sp.image_ms_quick(msfile, calib_ms=None, bcal=bcal_table, do_selfcal=do_selfcal,\
                                         imagename=imagename, logging_level='info', \
@@ -524,8 +526,17 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         else:
             default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
                 helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes + ' ' + msfile_slfcaled)
- 
-        os.system(default_wscleancmd)
+
+        
+        cmd= shlex.split(default_wscleancmd)
+        
+        try:
+            wsclean_proc=subprocess.run(cmd)
+        except Exception as e:
+            wsclean_proc.terminate()
+            raise e
+           
+       # os.system(default_wscleancmd)
 
         outfits = glob.glob(helio_imagename + '*-image.fits')
         outfits.sort()
@@ -728,7 +739,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     caltable_folder = calib_dir
     # gaintable_folder is where the intermediate gain tables are located
     gaintable_folder = proc_dir + '/caltables/'
-    visdir_calib = proc_dir + '/'+file_path+'_slow_calib/'
+    visdir_calib = proc_dir + '/slow_calib/'
     visdir_work = proc_dir + '/'+file_path+'_working/'
     visdir_slfcaled = proc_dir + '/'+file_path+'_slfcaled/'
     imagedir_allch = proc_dir + '/'+file_path+'_images_allch/'
@@ -742,6 +753,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     ## Night-time MS files used for calibration ##
     msfiles_cal = glob.glob(visdir_calib + calib_file + '_*MHz.ms')
     msfiles_cal.sort()
+    
 
     bcal_tables = glob.glob(caltable_folder + calib_file + '_*MHz.bcal')
     bcal_tables.sort()
@@ -845,8 +857,13 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 logging.error(e)
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
-                pool.terminate()
+                username=os.getlogin()
+                process_id=os.getpgid(0)
+                #os.system("pdsh -w lwacalim[01-09] 'pkill -u "+username+ " "+"-g "+str(process_id)+" -f wsclean'")
+                #pool.terminate()
                 pool.close()
+                pool.join()
+
             if delete_working_ms:
                 for file1 in msfiles0_name:
                     timestr1 = utils.get_timestr_from_name(file1)
