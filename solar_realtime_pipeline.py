@@ -1,7 +1,10 @@
 #!/usr/bin/env python
+import os, sys, glob, getopt
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
 from signal import signal, SIGPIPE, SIG_DFL
 signal(SIGPIPE,SIG_DFL)
-import os, sys, glob, getopt
 from ovrolwasolar import solar_pipeline as sp
 from ovrolwasolar.primary_beam import analytic_beam as beam
 from ovrolwasolar import utils, calibration, flagging
@@ -428,7 +431,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         return -1
 
 
-def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, stokes='I', beam_fit_size=2):
+def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, stokes='I', beam_fit_size=2, briggs=-0.5):
     blc = int(512 - 128)
     trc = int(512 + 128 - 1)
     region='box [ [ {0:d}pix , {1:d}pix] , [{2:d}pix, {3:d}pix ] ]'.format(blc, blc, trc, trc)
@@ -456,19 +459,25 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         sclfactor = 1. / jones_matrices[0][0]
         helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun') 
-        default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs -0.5 -minuv-l 10 -auto-threshold 3 -name " + 
+        default_wscleancmd = ("wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs " + 
+        str(briggs) + " -minuv-l 10 -auto-threshold 3 -name " + 
                 helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes + " -join-channels -channels-out " + str(nch_out) + ' ' + msfile_slfcaled)
- 
-        os.system(default_wscleancmd)
+        #os.system(default_wscleancmd)
+        cmd= shlex.split(default_wscleancmd)
+        wsclean_proc=subprocess.run(cmd)
 
         outfits = glob.glob(helio_imagename + '*-image.fits')
         outfits.sort()
-        outfits_helio = hf.imreg(msfile_slfcaled, outfits, ephem=ephem, msinfo=msinfo, timerange=[tref_str] * len(outfits), 
-                usephacenter=True, verbose=True, toTb=True, subregion=region, sclfactor=sclfactor)
-        return outfits_helio
+        if len(outfits) > 0:
+            outfits_helio = hf.imreg(msfile_slfcaled, outfits, ephem=ephem, msinfo=msinfo, timerange=[tref_str] * len(outfits), 
+                    usephacenter=True, verbose=True, toTb=True, subregion=region, sclfactor=sclfactor)
+            return outfits_helio
+        else:
+            logging.error('No fits images produced.')
+            return -1
     except Exception as e:
+        wsclean_proc.terminate()
         logging.error(e)
-        #logging.error('{0:s}: Imaging for {1:s} failed'.format(socket.gethostname(), msfile_slfcaled))
         return -1
 
 
@@ -617,7 +626,7 @@ def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/',
 
 
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 
-            min_nband=6, nch_out=12, beam_fit_size=2, stokes='I', do_selfcal=True, num_phase_cal=0, num_apcal=1, 
+            min_nband=6, nch_out=12, beam_fit_size=2, briggs=-0.5, stokes='I', do_selfcal=True, num_phase_cal=0, num_apcal=1, 
             overwrite_ms=False, delete_ms_slfcaled=False, logger_file=None, compress_fits=True,
             proc_dir = '/fast/bin.chen/realtime_pipeline/',
             save_dir = '/lustre/bin.chen/realtime_pipeline/',
@@ -636,6 +645,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     :param calib_file: calibration file to be used. Format yyyymmdd_hhmmss
     :param nch_out: number of channels to be imaged
     :param beam_fit_size: size of the beam area used for fitting to be passed to wsclean. See https://wsclean.readthedocs.io/en/v3.0/restoring_beam_size.html
+    :param briggs: briggs weighting parameter to be passed to wsclean. -1 is close to uniform and 1 is close to natural. See https://wsclean.readthedocs.io/en/latest/image_weighting.html
     :param do_selfcal: if True, do selfcalibration
     :param num_phase_cal: number of phase calibration iterations
     :param num_apcal: number of amplitude calibration iterations
@@ -758,7 +768,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             run_calib_partial = partial(run_calib, msfiles_cal=msfiles_cal, bcal_tables=bcal_tables, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, 
                     logger_file=logger_file, caltable_folder=gaintable_folder, visdir_slfcaled=visdir_slfcaled, flagdir=flagdir)
             result = pool.map_async(run_calib_partial, msfiles)
-            timeout = 1200.
+            timeout = 600.
             result.wait(timeout=timeout)
             #if result.ready():
             #    time_cal2 = timeit.default_timer()
@@ -770,14 +780,17 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 msfiles_slfcaled = result.get(timeout)
                 time_cal2 = timeit.default_timer()
                 logging.debug('Calibration for all {0:d} bands is done in {1:.1f} s'.format(len(msfiles), time_cal2-time_cal1))
-                pool.close()
-                pool.join()
             except TimeoutError as e:
                 logging.error(e)
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
-                pool.terminate()
-                pool.close()
+                pass
+                #username=os.getlogin()
+                #process_id = os.getpgid(0)
+                #os.system("kill -u " + username + " " + "-g " + str(process_id) + " -f wsclean")
+                #pool.terminate()
+            pool.close()
+            pool.join()
                 
             if delete_working_ms:
                 os.system('rm -rf '+ visdir_work + '/' + timestr + '*')
@@ -819,7 +832,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             tref = Time(tref_mjd, format='mjd')
             ephem = hf.read_horizons(tref, dur=1./60./24., observatory='OVRO_MMA')
             pool = multiprocessing.pool.Pool(processes=len(msfiles_slfcaled_success))
-            run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size)
+            run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
             result = pool.map_async(run_imager_partial, msfiles_slfcaled_success)
             timeout = 200.
             #result.wait(timeout=timeout)
@@ -834,14 +847,13 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 fitsfiles = result.get(timeout)
                 time_img2 = timeit.default_timer()
                 logging.debug('Imaging for all {0:d} bands is done in {1:.1f} s'.format(len(msfiles_slfcaled_success), time_img2-time_img1))
-                pool.close()
-                pool.join()
             except TimeoutError as e:
                 logging.error(e)
                 logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
-                pool.terminate()
-                pool.close()
+                pass
+            pool.close()
+            pool.join()
 
         else:
             logging.error('For time {0:s}, less than 4 bands out of {1:d} bands were calibrated successfully. Abort....'.format(timestr, len(bands)))
@@ -983,12 +995,13 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
 def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay_from_now=180., do_selfcal=True, num_phase_cal=0, num_apcal=1, 
         server=None, lustre=True, file_path='slow', multinode=True, nodes='0123456789', delete_ms_slfcaled=True, 
-        logger_dir = '/lustre/bin.chen/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
-        proc_dir = '/fast/bin.chen/realtime_pipeline/',
-        save_dir = '/lustre/bin.chen/realtime_pipeline/',
-        calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
-        calib_file = '20240117_145752', altitude_limit=15., 
-        beam_fit_size = 2, 
+        logger_dir='/lustre/bin.chen/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
+        proc_dir='/fast/bin.chen/realtime_pipeline/',
+        save_dir='/lustre/bin.chen/realtime_pipeline/',
+        calib_dir='/lustre/bin.chen/realtime_pipeline/caltables/',
+        calib_file='20240117_145752', altitude_limit=15., 
+        beam_fit_size=2, 
+        briggs=-0.5,
         delete_working_ms=True, do_refra=True, delete_working_fits=True):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
@@ -1007,6 +1020,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     :param calib_file: calibration file to be used. Format yyyymmdd_hhmmss
     :param altitude_limit: lowest altitude to start the pipeline in degrees. Default to 15 deg.
     :param beam_fit_size: size of the beam area used for fitting to be passed to wsclean. See https://wsclean.readthedocs.io/en/v3.0/restoring_beam_size.html
+    :param briggs: briggs weighting parameter to be passed to wsclean. -1 is close to uniform and 1 is close to natural. See https://wsclean.readthedocs.io/en/latest/image_weighting.html
     '''
     try:
         time_start = Time(time_start)
@@ -1068,7 +1082,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         logging.info('{0:s}: Start processing {1:s}'.format(socket.gethostname(), time_start.isot))
         res = pipeline_quick(time_start, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, server=server, lustre=lustre, file_path=file_path, 
                 delete_ms_slfcaled=delete_ms_slfcaled, logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, calib_file=calib_file, 
-                delete_working_ms=delete_working_ms, delete_working_fits=delete_working_fits, do_refra=do_refra, beam_fit_size=beam_fit_size)
+                delete_working_ms=delete_working_ms, delete_working_fits=delete_working_fits, do_refra=do_refra, beam_fit_size=beam_fit_size, briggs=briggs)
         time2 = timeit.default_timer()
         if res:
             logging.info('{0:s}: Processing {1:s} was successful within {2:.1f}m'.format(socket.gethostname(), time_start.isot, (time2-time1)/60.))
@@ -1141,6 +1155,7 @@ if __name__=='__main__':
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
     parser.add_argument('--alt_limit', default=15., help='Lowest solar altitude to start/end imaging')
     parser.add_argument('--bmfit_sz', default=2, help='Beam fitting size to be passed to wsclean')
+    parser.add_argument('--briggs', default=-0.5, help='Briggs weighting parameter to be passed to wsclean')
     parser.add_argument('--do_refra', default=True, help='If True, do refraction correction', action='store_true')
     parser.add_argument('--singlenode', default=False, help='If True, delay the start time by the node', action='store_true')
     parser.add_argument('--logger_dir', default='/lustre/bin.chen/realtime_pipeline/logs/', help='Directory for logger files')
@@ -1166,9 +1181,10 @@ if __name__=='__main__':
         run_pipeline(args.prefix, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=args.nodes, delay_from_now=float(args.delay),
                      server=args.server, lustre=(not args.nolustre), file_path=args.file_path,
                      proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
-                     altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), do_refra=args.do_refra, 
+                     altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
+                     do_refra=args.do_refra, 
                      multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
-                     delete_working_fits=(not args.keep_working_fits), beam_fit_size=args.bmfit_sz)
+                     delete_working_fits=(not args.keep_working_fits), beam_fit_size=args.bmfit_sz, briggs=args.briggs)
     except Exception as e:
         logging.error(e)
         raise e
