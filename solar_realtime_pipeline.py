@@ -667,7 +667,7 @@ def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/',
                         utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
                         fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
                         fig.savefig(fig_mfs_dir_lv15 + datedir + figname_lv15)
-                        figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_' + slowfast + '_mfs_10s.')
+                        figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
                         os.system('cp '+ fig_mfs_dir_lv15 + datedir + figname_lv15 + ' ' + fig_mfs_dir_synop + datedir + figname_synop)
 
                         fits_fch_lv15 = orefr.apply_refra_record(fits_fch_lv10, refra_rec, fname_out=fits_fch_lv15)
@@ -996,17 +996,17 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                             if not success:
                                 logging.info('Refraction correction failed for '+ btime.isot)
                                 figname_to_copy=plotted_image
-                                figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs_10s.', '.synop_slow_mfs_10s.')    
+                                figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs.', '.synop_mfs.')    
                             else:
                                 figname_to_copy=refra_image
-                                figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs_10s.', '.synop_slow_mfs_10s.')
+                                figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs.', '.synop_mfs.')
                       
                     if not figname_to_copy:
                         figname_to_copy=plotted_image
-                        figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop_slow')             
+                        figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
                 else:
                     figname_to_copy=plotted_image
-                    figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop_fast')             
+                    figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
 
                 synoptic_image=os.path.join(fig_mfs_dir_sub_synop, figname_synop)    
                 os.system('cp '+ figname_to_copy + ' ' + synoptic_image)   
@@ -1075,6 +1075,11 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
 
 def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined, \
                             hdf_dir, fig_mfs_dir, stokes, fast_vis=False):    
+
+    if fast_vis:
+        imagename_pre = 'ovro-lwa-48'
+    else:
+        imagename_pre = 'ovro-lwa-352'
     ## define subdirectories for storing the fits and png files
     
     btime=starttime
@@ -1094,7 +1099,7 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     timestr_iso = btime.isot[:-4].replace(':','')+'Z'
     
     # multi-frequency synthesis images
-    fits_mfs = imagedir_allch_combined_sub_lv10 + '/ovro-lwa.lev1_mfs_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
+    fits_mfs = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_mfs_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
     #fitsfiles_mfs = glob.glob(imagedir_allch + '/' + timestr+ '*MFS-image.fits')
     fitsfiles_mfs = []
     for f in fitsfiles:
@@ -1117,7 +1122,7 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     
     #if not fast_vis:
     # fine channel spectral images
-    fits_fch = imagedir_allch_combined_sub_lv10 + '/ovro-lwa.lev1_fch_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
+    fits_fch = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_fch_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
     fitsfiles_fch = []
     for f in fitsfiles:
         if type(f) is list:
@@ -1269,6 +1274,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     # find out when the Sun is high enough in the sky
     if time_start < t_rise:
         twait = t_rise - time_start
+        if slowfast.lower() == 'fast':
+            twait += TimeDelta(600., format='sec') 
         logging.info('{0:s}: Start time {1:s} is before sunrise. Wait for {2:.1f} hours to start.'.format(socket.gethostname(), time_start.isot, twait.value * 24.))
         time_start += TimeDelta(twait.sec + 60., format='sec')
         sleep(twait.sec + 60.)
@@ -1326,6 +1333,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 twait = t_rise_next - Time.now() 
                 logging.info('{0:s}: Sun is setting. Done for the day. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
 
+            if slowfast.lower() == 'fast':
+                twait += TimeDelta(600., format='sec') 
             time_start += TimeDelta(twait.sec + 60. + delay_by_node, format='sec')
             t_rise = t_rise_next
             t_set = t_set_next
@@ -1379,17 +1388,24 @@ if __name__=='__main__':
     parser.add_argument('--logger_level', default=10, help='Specify logging level. Default to 10 (debug)')   
     parser.add_argument('--keep_working_ms', default=False, help='If True, keep the working ms files after imaging', action='store_true')
     parser.add_argument('--keep_working_fits', default=False, help='If True, keep the working fits files after imaging', action='store_true')
-    parser.add_argument('--no_selfcal', default=False, help='If True, perform selfcal', action='store_true')
-    parser.add_argument('--no_imaging', default=False, help='If True, perform imaging', action='store_true')
+    parser.add_argument('--no_selfcal', default=False, help='If set, do not do selfcal regardless slow or fast', action='store_true')
+    parser.add_argument('--no_imaging', default=False, help='If set, do not perform imaging', action='store_true')
+    parser.add_argument('--sleep_time', default=0.0, help='Process will sleep for these seconds before doing anything')
+    parser.add_argument('--slowfast', default='slow', help='Specify slow or fast visibility data to be processed')
     parser.add_argument('--bands', '--item', action='store', dest='bands',
                     type=str, nargs='*', 
                     default=['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
                     help="Examples: --bands 32MHz 46MHz 64MHz")
-    parser.add_argument('--sleep_time', default=0.0, help='Process will sleep for these seconds before doing anything')
-    parser.add_argument('--slowfast', default='slow', help='Specify slow or fast visibility data to be processed')
     
     args = parser.parse_args()
     sleep(int(args.sleep_time))
+
+    if args.slowfast.lower() == 'fast':
+        do_selfcal=False
+    elif args.slowfast.lower() == 'slow' and args.no_selfcal:
+        do_selfcal=False
+    else:
+        do_selfcal=True
     
     if len(args.calib_file) == 15:
         calib_file = args.calib_file
@@ -1410,7 +1426,7 @@ if __name__=='__main__':
                      altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
                      do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
                      delete_working_fits=(not args.keep_working_fits), beam_fit_size=args.bmfit_sz, briggs=args.briggs,
-                     do_selfcal=(not args.no_selfcal), do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast)
+                     do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast)
     except Exception as e:
         logging.error(e)
         raise e
