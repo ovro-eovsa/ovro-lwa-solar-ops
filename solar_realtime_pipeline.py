@@ -159,13 +159,17 @@ def list_msfiles(intime, lustre=True, file_path='slow', server=None, time_interv
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
             processes.append(p)
             filenames = p.communicate()[0].decode('utf-8').split('\n')[:-1]
-            for filename in filenames:
-                if filename[-6:] == 'MHz.ms':
-                    filestr = pathstr + filename
-                    tmpstr = filename[:15].replace('_', 'T')
-                    timestr = tmpstr[:4] + '-' + tmpstr[4:6] + '-' + tmpstr[6:11] + ':' + tmpstr[11:13] + ':' + tmpstr[13:]
-                    freqstr = filename[16:21]
-                    msfiles.append({'path': filestr, 'name': filename, 'time': timestr, 'freq': freqstr})
+            if len(filenames) > 0:
+                for filename in filenames:
+                    if filename[-6:] == 'MHz.ms':
+                        filestr = pathstr + filename
+                        tmpstr = filename[:15].replace('_', 'T')
+                        timestr = tmpstr[:4] + '-' + tmpstr[4:6] + '-' + tmpstr[6:11] + ':' + tmpstr[11:13] + ':' + tmpstr[13:]
+                        freqstr = filename[16:21]
+                        msfiles.append({'path': filestr, 'name': filename, 'time': timestr, 'freq': freqstr})
+            else:
+                logging.info('Did not find any files at the given time {0:s}.'.format(intime.isot)) 
+                msfiles=[]
     else:
         if server:
             cmd = 'ssh ' + server + ' ls ' + file_path + ' | grep ' + tstr
@@ -173,23 +177,28 @@ def list_msfiles(intime, lustre=True, file_path='slow', server=None, time_interv
             cmd = 'ls ' + file_path + ' | grep ' + tstr
         p = subprocess.run(cmd, capture_output=True, shell=True)
         filenames = p.stdout.decode('utf-8').split('\n')[:-1]
-        for filename in filenames:
-            if filename[-6:] == 'MHz.ms':
-                if server:
-                    pathstr = '{0:s}:{1:s}/{2:s}'.format(server, file_path, filename)
-                else:
-                    pathstr = '{0:s}/{1:s}'.format(file_path, filename)
-                tmpstr = filename[:15].replace('_', 'T')
-                timestr = tmpstr[:4] + '-' + tmpstr[4:6] + '-' + tmpstr[6:11] + ':' + tmpstr[11:13] + ':' + tmpstr[13:]
-                freqstr = filename[16:21]
-                msfiles.append({'path': pathstr, 'name': filename, 'time': timestr, 'freq': freqstr})
+        if len(filenames) > 0:
+            for filename in filenames:
+                if filename[-6:] == 'MHz.ms':
+                    if server:
+                        pathstr = '{0:s}:{1:s}/{2:s}'.format(server, file_path, filename)
+                    else:
+                        pathstr = '{0:s}/{1:s}'.format(file_path, filename)
+                    tmpstr = filename[:15].replace('_', 'T')
+                    timestr = tmpstr[:4] + '-' + tmpstr[4:6] + '-' + tmpstr[6:11] + ':' + tmpstr[11:13] + ':' + tmpstr[13:]
+                    freqstr = filename[16:21]
+                    msfiles.append({'path': pathstr, 'name': filename, 'time': timestr, 'freq': freqstr})
+        else:
+            logging.info('Did not find any files at the given time {0:s}.'.format(intime.isot)) 
+            msfiles = []
     return msfiles
 
 def download_msfiles_cmd(msfile_path, server, destination):
     if server:
         p = subprocess.Popen(shlex.split('rsync -az --numeric-ids --info=progress2 --no-perms --no-owner --no-group {0:s}:{1:s} {2:s}'.format(server, msfile_path, destination)))
     else:
-        p = subprocess.Popen(shlex.split('rsync -az --numeric-ids --info=progress2 --no-perms --no-owner --no-group {0:s} {1:s}'.format(msfile_path, destination)))
+        #p = subprocess.Popen(shlex.split('rsync -az --numeric-ids --info=progress2 --no-perms --no-owner --no-group {0:s} {1:s}'.format(msfile_path, destination)))
+        p = subprocess.Popen(shlex.split('cp -r {0:s} {1:s}'.format(msfile_path, destination)))
     std_out, std_err = p.communicate()
     if std_err:
         print(std_err)
@@ -431,10 +440,11 @@ def check_fast_ms(msname):
     if num_ants>50:
         return False
     return True
+
     
 def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=0, 
                 num_apcal=1, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
-                flagdir=None):
+                flagdir=None, delete_allsky=False):
     
     # do time average if the input ms file is fast visibility
     if check_fast_ms(msfile):
@@ -473,7 +483,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
                                         num_phase_cal=num_phase_cal, num_apcal=num_apcal,
                                         logfile=logger_file, caltable_folder=caltable_folder, \
                                         do_final_imaging=False, do_fluxscaling=False, freqbin=1, \
-                                        fast_vis=fast_vis)
+                                        fast_vis=fast_vis, delete_allsky=delete_allsky)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
             if os.path.exists(msfile.replace('.ms', '.badants')):
                 os.system('cp '+ msfile.replace('.ms', '.badants') + ' ' + flagdir + '/')
@@ -489,7 +499,8 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         try:
             outms, tmp = sp.image_ms_quick(msfile, calib_ms=msfile_cal, do_selfcal=do_selfcal, imagename=imagename, logging_level='info', 
                         num_phase_cal=num_phase_cal, num_apcal=num_apcal,
-                        logfile=logger_file, caltable_folder=caltable_folder, do_final_imaging=False, do_fluxscaling=False, freqbin=1)
+                        logfile=logger_file, caltable_folder=caltable_folder, do_final_imaging=False, 
+                        do_fluxscaling=False, freqbin=1, delete_allsky=delete_allsky)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
             msfile_slfcaled = visdir_slfcaled + '/' + os.path.basename(outms)
             return msfile_slfcaled
@@ -705,8 +716,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
             calib_file = '20240117_145752',
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6,
-            slowfast='slow',
-            do_imaging=True,
+            slowfast='slow', do_imaging=True, delete_allsky=True,
             bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
     """
     Pipeline for processing and imaging slow visibility data
@@ -769,6 +779,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     imagedir_allch_combined = save_dir + '/fits/' + slowfast + '/'
     hdf_dir = save_dir + '/hdf/' + slowfast + '/'
     fig_mfs_dir = save_dir + '/figs_mfs/' + slowfast + '/'
+    allsky_dir = save_dir + '/allsky/' 
+    allsky_dir_fits = allsky_dir + 'fits/'
+    allsky_dir_figs = allsky_dir + 'figs/'
 
     ## Night-time MS files used for calibration ##
     msfiles_cal = glob.glob(visdir_calib + calib_file + '_*MHz.ms')
@@ -805,26 +818,50 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     if not os.path.exists(fig_mfs_dir):
         os.makedirs(fig_mfs_dir)
 
+    if not os.path.exists(allsky_dir_fits):
+        os.makedirs(allsky_dir_fits)
+
+    if not os.path.exists(allsky_dir_figs):
+        os.makedirs(allsky_dir_figs)
+
     try:
         print(socket.gethostname(), '=======Processing Time {0:s}======='.format(image_time.isot))
         #logging.info('=======Processing Time {0:s}======='.format(image_time.isot))
-        msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path)
+        msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s')
+        # check if the currently requested time has enough number of bands
         if len(msfiles0) < min(min_nband, len(bands)):
             print('This time only has {0:d} subbands. Check nearby +-10s time.'.format(len(msfiles0)))
-            image_time_before = image_time - TimeDelta(10., format='sec')
-            msfiles0_before = list_msfiles(image_time_before, lustre=lustre, server=server, file_path=file_path)
-            image_time_after = image_time + TimeDelta(10., format='sec')
-            msfiles0_after = list_msfiles(image_time_after, lustre=lustre, server=server, file_path=file_path)
-            if len(msfiles0_before) < min(min_nband, len(bands)) and len(msfiles0_after) < min(min_nband, len(bands)):
+            if slowfast.lower()=='slow':
+                image_time_before = image_time - TimeDelta(10., format='sec')
+                msfiles0_before = list_msfiles(image_time_before, lustre=lustre, server=server, file_path=file_path)
+                image_time_after = image_time + TimeDelta(10., format='sec')
+                msfiles0_after = list_msfiles(image_time_after, lustre=lustre, server=server, file_path=file_path)
+                if len(msfiles0_before) < min(min_nband, len(bands)) and len(msfiles0_after) < min(min_nband, len(bands)):
+                    print('I cannot find a nearby time with at least {0:d} available subbands. Abort and wait for next time interval.'.format(min_nband))
+                    return False
+                else:
+                    if len(msfiles0_before) > len(msfiles0_after):
+                        msfiles0 = msfiles0_before
+                        image_time = image_time_before
+                    else:
+                        msfiles0 = msfiles0_after
+                        image_time = image_time_after
+            else:
                 print('I cannot find a nearby time with at least {0:d} available subbands. Abort and wait for next time interval.'.format(min_nband))
                 return False
-            else:
-                if len(msfiles0_before) > len(msfiles0_after):
-                    msfiles0 = msfiles0_before
-                    image_time = image_time_before
-                else:
-                    msfiles0 = msfiles0_after
-                    image_time = image_time_after
+
+        msfiles0_ts = [f['time'] for f in msfiles0]
+        msfiles0_tref = Time(np.median(Time(msfiles0_ts).mjd), format='mjd')
+        if len(msfiles0) < len(bands):
+            # try to find missing times from nearby times that are +-4 s within the reference time
+            msfiles0_before = list_msfiles(image_time - TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
+            msfiles0_before_ts = [f['time'] for f in msfiles0_before]
+            msfiles0_after = list_msfiles(image_time + TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
+            msfiles0_after_ts = [f['time'] for f in msfiles0_after]
+            msfiles0_all = msfiles0_before + msfiles0 + msfiles0_after
+            msfiles0_all_ts = msfiles0_before_ts + msfiles0_ts + msfiles0_after_ts
+            idxs, = np.where(np.abs((Time(msfiles0_all_ts).mjd - msfiles0_tref.mjd)) < 4./86400.)
+            msfiles0 = [msfiles0_all[idx] for idx in idxs]
         
         msfiles0_freq = [f['freq'] for f in msfiles0]
         msfiles0_name = [f['name'] for f in msfiles0]
@@ -859,9 +896,12 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             #result = pool.map_async(run_calib, msfiles)
             run_calib_partial = partial(run_calib, msfiles_cal=msfiles_cal, bcal_tables=bcal_tables, do_selfcal=do_selfcal, 
                     num_phase_cal=num_phase_cal, num_apcal=num_apcal, logger_file=logger_file, caltable_folder=gaintable_folder, 
-                    visdir_slfcaled=visdir_slfcaled, flagdir=flagdir)
+                    visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky)
             result = pool.map_async(run_calib_partial, msfiles)
-            timeout = 300.
+            if slowfast.lower()=='slow':
+                timeout = 800.
+            else:
+                timeout = 200.
             result.wait(timeout=timeout)
             if result.ready():
                 msfiles_slfcaled = result.get()
@@ -870,16 +910,48 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             else:
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
+                pool.terminate()
                 msfiles_slfcaled = [] 
 
             pool.close()
             pool.join()
-                
-            if delete_working_ms:
-                for file1 in msfiles0_name:
-                    timestr1 = utils.get_timestr_from_name(file1)
-                    freqstr=utils.get_freqstr_from_name(file1)
+            
+            allsky_fitsfiles=[]
+            for file1 in msfiles0_name:
+                timestr1 = utils.get_timestr_from_name(file1)
+                freqstr=utils.get_freqstr_from_name(file1)
+                if not delete_allsky and slowfast.lower()=='slow':
+                    allsky_dir_fits_sub = allsky_dir_fits + '/'+ timestr1[0:4]+'/'+timestr1[4:6]+'/'+timestr1[6:8]+'/'
+                    if not os.path.exists(allsky_dir_fits_sub):
+                        os.makedirs(allsky_dir_fits_sub)
+                    timestr_out = timestr1[:4]+'-'+timestr1[4:6]+'-'+timestr1[6:8]+'T'+timestr1[9:15]
+                    allsky_fitsfile_search = glob.glob(visdir_work + '/' + timestr1 + '_' + freqstr + '*_allsky-image.fits')
+                    if len(allsky_fitsfile_search) == 1:
+                        logging.debug('All sky image exists. Move it to '+allsky_dir_fits_sub)
+                        allsky_fitsfile0 = allsky_fitsfile_search[0]
+                        allsky_fitsfile = 'ovro-lwa-352.allsky_'+freqstr+'_10s.'+timestr_out + '.image_I.fits'
+                        mvcommand = 'mv ' + allsky_fitsfile0 + ' ' + allsky_dir_fits_sub + allsky_fitsfile
+                        os.system(mvcommand)
+                        allsky_fitsfiles.append(allsky_dir_fits_sub + allsky_fitsfile)
+                    else:
+                        logging.info('All sky image {0:s} does not exist.'.format(allsky_fitsfile_search))
+
+
+                if delete_working_ms:
                     os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*')
+
+            if len(allsky_fitsfiles) > 4:
+                logging.info('Making allsky plots')
+                timestr_ = os.path.basename(allsky_fitsfiles[0]).split('.')[2].split('-')
+                allsky_dir_figs_sub = allsky_dir_figs + '/'+ timestr_[0] + '/' + timestr_[1] + '/' + timestr_[2][:2]+'/'
+                if not os.path.exists(allsky_dir_figs_sub):
+                    logging.debug('Putting allsky plots in '+allsky_dir_figs_sub)
+                    os.makedirs(allsky_dir_figs_sub)
+                fig, axes = ovis.make_allsky_image_plots(allsky_fitsfiles)
+                figname_pre = os.path.basename(allsky_fitsfiles[0]).split('_')[0]
+                figname_allsky = figname_pre + os.path.basename(allsky_fitsfiles[0])[len(figname_pre)+6:].replace('.fits', '.png')
+                logging.info('Saving allsky plots to ' + allsky_dir_figs_sub + '/' + figname_allsky)
+                fig.savefig(allsky_dir_figs_sub + '/' + figname_allsky)
                 
         else:
             logging.debug('=====Selfcalibrated ms already exist for {0:s}. Proceed with imaging.========'.format(timestr)) 
@@ -888,7 +960,6 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     timestr1 = utils.get_timestr_from_name(file1)
                     freqstr=utils.get_freqstr_from_name(file1)
                     os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*')
-                
 
 
         # Do imaging
@@ -929,6 +1000,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                                    stokes=stokes, beam_fit_size=beam_fit_size)
             btime = Time(trange['begin']['m0']['value'], format='mjd')
 
+
         else:
             logging.error('For time {0:s}, less than 4 bands out of {1:d} bands were calibrated successfully. Abort....'.format(timestr, len(bands)))
             for file1 in msfiles0_name:
@@ -940,23 +1012,23 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*')
             return False
 
-        if delete_ms_slfcaled:
-            new_caltables={}
-            for file1 in msfiles0_name:
-                timestr1 = utils.get_timestr_from_name(file1)
-                freqstr=utils.get_freqstr_from_name(file1)
+        new_caltables={}
+        for file1 in msfiles0_name:
+            timestr1 = utils.get_timestr_from_name(file1)
+            freqstr=utils.get_freqstr_from_name(file1)
+            if delete_ms_slfcaled:
                 os.system('rm -rf '+ visdir_slfcaled + '/' + timestr1 + '_*'+freqstr+'*.ms')
-                os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*')
-                new_caltables[freqstr]=len(glob.glob(os.path.join(gaintable_folder,timestr1+"_"+freqstr+"*.gcal"))) 
-                               
-            for calfile in prev_calfiles:
-                freqstr=utils.get_freqstr_from_name(calfile)
-                try:
-                    if new_caltables[freqstr]!=0 and do_selfcal:
-                        os.system('rm -rf '+calfile) ### I am only deleting the previous calfile and
-                                                 ### and that also when this round has exited successfully.
-                except KeyError:
-                    pass
+            new_caltables[freqstr]=len(glob.glob(os.path.join(gaintable_folder,timestr1+"_"+freqstr+"*.gcal"))) 
+                           
+        for calfile in prev_calfiles:
+            freqstr=utils.get_freqstr_from_name(calfile)
+            try:
+                if new_caltables[freqstr]!=0 and do_selfcal:
+                    os.system('rm -rf '+calfile) 
+                    os.system('rm -rf '+calfile + '.fast') ### I am only deleting the previous calfile and
+                                             ### and that also when this round has exited successfully.
+            except KeyError:
+                pass
         
         if 'fitsfiles' in locals():
             if (len(fitsfiles[0]) > 1 and not fast_vis) or (fast_vis and len(fitsfiles[0]) >= 1):
@@ -978,7 +1050,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 if not os.path.exists(fig_mfs_dir_sub_synop):
                     os.makedirs(fig_mfs_dir_sub_synop)
                     
-                fits_images,plotted_image=compress_plot_images(fitsfiles, btime, datedir, imagedir_allch_combined, hdf_dir, \
+                fits_images, plotted_image = compress_plot_images(fitsfiles, btime, datedir, imagedir_allch_combined, hdf_dir, \
                                         fig_mfs_dir, stokes, fast_vis=fast_vis)
                 
                 logging.info("Level 1 images plotted ok")
@@ -997,10 +1069,10 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                             if not success:
                                 logging.info('Refraction correction failed for '+ btime.isot)
                                 figname_to_copy=plotted_image
-                                figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs.', '.synop_mfs.')    
+                                figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs', '.synop_mfs')    
                             else:
                                 figname_to_copy=refra_image
-                                figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs.', '.synop_mfs.')
+                                figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs', '.synop_mfs')
                       
                     if not figname_to_copy:
                         figname_to_copy=plotted_image
@@ -1067,6 +1139,7 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     else:
         logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
         logging.debug('Proceed anyway')
+        pool.terminate()
         fitsfiles = []
             
     pool.close()
@@ -1211,7 +1284,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         beam_fit_size = 2,
         briggs=-0.5,
         delete_working_ms=True, do_refra=True, delete_working_fits=True,
-        do_imaging=True,
+        do_imaging=True, delete_allsky=True,
         bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
@@ -1245,11 +1318,11 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         
     (t_rise, t_set) = sun_riseset(time_start, altitude_limit=altitude_limit)
     # set up logging file
-    server = socket.gethostname()
+    server_runtime = socket.gethostname()
     datestr = Time(time_start.mjd, format='mjd').isot[:10].replace('-','')
     datedir = Time(time_start.mjd, format='mjd').isot[:10].replace('-','/') + '/'
     
-    logger_file = logger_dir + datedir + logger_prefix + '_' + slowfast + '_'+ datestr + '_' + server + '.log'  
+    logger_file = logger_dir + datedir + logger_prefix + '_' + slowfast + '_'+ datestr + '_' + server_runtime + '.log'  
 
     if not os.path.exists(os.path.dirname(logger_file)):
         print('Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
@@ -1304,7 +1377,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                             logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, 
                             calib_file=calib_file, delete_working_ms=delete_working_ms,
                             delete_working_fits=delete_working_fits, do_refra=do_refra,
-                            beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands)
+                            beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky)
 
         time2 = timeit.default_timer()
         if res:
@@ -1325,7 +1398,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             else:
                 date_synop = Time(time_start.mjd, format='mjd').isot[:10]
             
-            if int(socket.gethostname()[-2:]) == nodes_list[-1]:
+            if int(socket.gethostname()[-2:]) == nodes_list[-1] and slowfast.lower()=='slow':
                 logging.info('{0:s}: Sun is setting. Done for the day. Doing refraction corrections for the full day.'.format(socket.gethostname())) 
                 daily_refra_correction(date_synop, save_dir=save_dir, overwrite=False, dointerp=True, interp_method='linear', max_dt=600.)
                 twait = t_rise_next - Time.now() 
@@ -1342,7 +1415,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             # updating the logger file
             datestr = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','')
             datedir = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','/') + '/'
-            logger_file = logger_dir + datedir + logger_prefix + '_' + datestr + '_' + server + '.log'  
+            logger_file = logger_dir + datedir + logger_prefix + '_' + datestr + '_' + server_runtime + '.log'  
 
             if not os.path.exists(os.path.dirname(logger_file)):
                 print('Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
@@ -1389,6 +1462,7 @@ if __name__=='__main__':
     parser.add_argument('--logger_level', default=10, help='Specify logging level. Default to 10 (debug)')   
     parser.add_argument('--keep_working_ms', default=False, help='If True, keep the working ms files after imaging', action='store_true')
     parser.add_argument('--keep_working_fits', default=False, help='If True, keep the working fits files after imaging', action='store_true')
+    parser.add_argument('--keep_allsky', default=False, help='If True, keep the band-averaged all sky images', action='store_true')
     parser.add_argument('--no_selfcal', default=False, help='If set, do not do selfcal regardless slow or fast', action='store_true')
     parser.add_argument('--no_imaging', default=False, help='If set, do not perform imaging', action='store_true')
     parser.add_argument('--sleep_time', default=0.0, help='Process will sleep for these seconds before doing anything')
@@ -1426,7 +1500,7 @@ if __name__=='__main__':
                      proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
                      altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
                      do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
-                     delete_working_fits=(not args.keep_working_fits), beam_fit_size=args.bmfit_sz, briggs=args.briggs,
+                     delete_working_fits=(not args.keep_working_fits), delete_allsky=(not args.keep_allsky), beam_fit_size=args.bmfit_sz, briggs=args.briggs,
                      do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast)
     except Exception as e:
         logging.error(e)
