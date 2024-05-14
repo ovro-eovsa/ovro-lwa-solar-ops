@@ -430,6 +430,19 @@ def get_selfcal_table_to_apply(msname,caltable_folder):
     caltables = glob.glob(caltable_folder + "/" + selfcal_time + "*" + msfreq_str + "*.gcal")
     return caltables
 
+def get_allsky_image_to_use(msname, img_folder):
+    mstime = utils.get_time_from_name(msname)
+    mstime_str = utils.get_timestr_from_name(msname)
+    msfreq_str = utils.get_freqstr_from_name(msname)
+    
+    imgs = glob.glob(os.path.join(img_folder,"*" + msfreq_str + "*allsky-image.fits"))
+    if len(imgs) == 0:
+        return []
+    img_time = utils.get_selfcal_time_to_apply(msname, imgs) ## function matches time str only. Hence can be used here
+    imgs = glob.glob(img_folder + "/" + img_time + "*" + msfreq_str + "*allsky-image.fits")
+    return imgs
+    
+
 def check_fast_ms(msname):
     msmd.open(msname)
     try:
@@ -477,13 +490,17 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         
         msfile_cal = None
         
+        fast_vis_model_subtraction=False
+       # prev_allsky_img=get_allsky_image_to_use(msfile,
+        
         try:
             outms, tmp = sp.image_ms_quick(msfile, calib_ms=None, bcal=bcal_table, do_selfcal=do_selfcal,\
                                         imagename=imagename, logging_level='info', \
                                         num_phase_cal=num_phase_cal, num_apcal=num_apcal,
                                         logfile=logger_file, caltable_folder=caltable_folder, \
                                         do_final_imaging=False, do_fluxscaling=False, freqbin=1, \
-                                        fast_vis=fast_vis, delete_allsky=delete_allsky)
+                                        fast_vis=fast_vis, delete_allsky=delete_allsky,\
+                                        fast_vis_model_subtraction=True)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
             if os.path.exists(msfile.replace('.ms', '.badants')):
                 os.system('cp '+ msfile.replace('.ms', '.badants') + ' ' + flagdir + '/')
@@ -868,6 +885,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         timestr = msfiles0_name[0][:15]
         
         prev_calfiles=glob.glob(os.path.join(gaintable_folder,"*.gcal"))#### these files will be deleted in this cycle
+        prev_allsky_imgs = glob.glob(os.path.join(visdir_work,'*_allsky-image.fits'))
         
         msfiles_slfcaled = glob.glob(visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
         msfiles_slfcaled.sort()
@@ -1013,12 +1031,14 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             return False
 
         new_caltables={}
+        new_allsky_imgs={}
         for file1 in msfiles0_name:
             timestr1 = utils.get_timestr_from_name(file1)
             freqstr=utils.get_freqstr_from_name(file1)
             if delete_ms_slfcaled:
                 os.system('rm -rf '+ visdir_slfcaled + '/' + timestr1 + '_*'+freqstr+'*.ms')
             new_caltables[freqstr]=len(glob.glob(os.path.join(gaintable_folder,timestr1+"_"+freqstr+"*.gcal"))) 
+            new_allsky_imgs[freqstr]=len(glob.glob(os.path.join(visdir_work,timestr1+"_"+freqstr+"*allsky-image.fits")))
                            
         for calfile in prev_calfiles:
             freqstr=utils.get_freqstr_from_name(calfile)
@@ -1027,6 +1047,14 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     os.system('rm -rf '+calfile) 
                     os.system('rm -rf '+calfile + '.fast') ### I am only deleting the previous calfile and
                                              ### and that also when this round has exited successfully.
+            except KeyError:
+                pass
+        
+        for imgfile in prev_allsky_imgs:
+            freqstr=utils.get_freqstr_from_name(imgfile)
+            try:
+                if new_allsky_imgs[freqstr]!=0 and do_selfcal:
+                    os.system('rm -rf '+imgfile.replace("image.fits","*"))
             except KeyError:
                 pass
         
