@@ -1432,7 +1432,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
 if __name__=='__main__':
     """
     Main routine of running the realtime pipeline. Example call
-        pdsh -w lwacalim[00-09] 'conda activate suncasa && python /opt/devel/bin.chen/ovro-lwa-solar/operations/solar_realtime_pipeline.py 2023-11-21T15:50'
+        Slow pipeline: pdsh -w lwacalim[00-09] 'conda activate suncasa && python /opt/devel/bin.chen/software/ovro-lwa-solar-ops/solar_realtime_pipeline.py 2024-05-15T14:10 --briggs -1.0 --slowfast slow --keep_allsky'
+        Fast pipeline: pdsh -w lwacalim[00-09] 'conda activate suncasa && python /opt/devel/bin.chen/software/ovro-lwa-solar-ops/solar_realtime_pipeline.py 2024-05-15T14:10 --briggs -0.5 --slowfast fast --interval 100'
     Sometimes afer killing the pipeline (with ctrl c), one need to remove the temporary files and kill all the processes before restarting.
         pdsh -w lwacalim[00-09] 'rm -rf /fast/bin.chen/realtime_pipeline/slow_working/*'
         pdsh -w lwacalim[00-09] 'rm -rf /fast/bin.chen/realtime_pipeline/slow_slfcaled/*'
