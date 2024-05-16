@@ -1415,7 +1415,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             # updating the logger file
             datestr = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','')
             datedir = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','/') + '/'
-            logger_file = logger_dir + datedir + logger_prefix + '_' + datestr + '_' + server_runtime + '.log'  
+            logger_file = logger_dir + datedir + logger_prefix + '_' + slowfast + '_'+ datestr + '_' + server_runtime + '.log'  
 
             if not os.path.exists(os.path.dirname(logger_file)):
                 print('Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
