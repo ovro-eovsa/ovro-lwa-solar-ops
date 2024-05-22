@@ -873,7 +873,6 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     try:
         print(socket.gethostname(), '=======Processing Time {0:s}======='.format(image_time.isot))
         #logging.info('=======Processing Time {0:s}======='.format(image_time.isot))
-        timestr=image_time.isot
         msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s')
         
         if len(msfiles0) < len(bands):
@@ -1195,7 +1194,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         logging.error(e)
         os.system('rm -rf '+imagedir_allch + '*')
         time_exit = timeit.default_timer()
-        logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(timestr, (time_exit-time_begin)/60.))
+        logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(image_time.isot, (time_exit-time_begin)/60.))
         return False
 
 
