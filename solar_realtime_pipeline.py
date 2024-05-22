@@ -873,9 +873,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     try:
         print(socket.gethostname(), '=======Processing Time {0:s}======='.format(image_time.isot))
         #logging.info('=======Processing Time {0:s}======='.format(image_time.isot))
+        timestr=image_time.isot
         msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s')
-        msfiles0_ts = [f['time'] for f in msfiles0]
-        msfiles0_tref = Time(np.median(Time(msfiles0_ts).mjd), format='mjd')
+        
         if len(msfiles0) < len(bands):
             # try to find missing times from nearby times that are +-4 s within the reference time
             msfiles0_before = list_msfiles(image_time - TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
@@ -889,8 +889,11 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             else:
                 msfiles0_after_ts = []
             msfiles0_all = msfiles0_before + msfiles0 + msfiles0_after
-            msfiles0_all_ts = msfiles0_before_ts + msfiles0_ts + msfiles0_after_ts
+            
             if len(msfiles0_all) > 0:
+                msfiles0_ts = [f['time'] for f in msfiles0]
+                msfiles0_tref = Time(np.median(Time(msfiles0_ts).mjd), format='mjd')
+                msfiles0_all_ts = msfiles0_before_ts + msfiles0_ts + msfiles0_after_ts
                 idxs, = np.where(np.abs((Time(msfiles0_all_ts).mjd - msfiles0_tref.mjd)) < 4./86400.)
                 msfiles0 = [msfiles0_all[idx] for idx in idxs]
             else:
