@@ -451,6 +451,19 @@ def get_selfcal_table_to_apply(msname,caltable_folder):
     caltables = glob.glob(caltable_folder + "/" + selfcal_time + "*" + msfreq_str + "*.gcal")
     return caltables
 
+def get_allsky_image_to_use(msname, img_folder):
+    mstime = utils.get_time_from_name(msname)
+    mstime_str = utils.get_timestr_from_name(msname)
+    msfreq_str = utils.get_freqstr_from_name(msname)
+    
+    imgs = glob.glob(os.path.join(img_folder,"*" + msfreq_str + "*allsky-image.fits"))
+    if len(imgs) == 0:
+        return []
+    img_time = utils.get_selfcal_time_to_apply(msname, imgs) ## function matches time str only. Hence can be used here
+    imgs = glob.glob(img_folder + "/" + img_time + "*" + msfreq_str + "*allsky-image.fits")
+    return imgs
+    
+
 def check_fast_ms(msname):
     msmd.open(msname)
     try:
@@ -498,13 +511,23 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         
         msfile_cal = None
         
+        fast_vis_image_model_subtraction=False
+        sky_image=None
+        prev_allsky_img=get_allsky_image_to_use(msfile,os.path.dirname(msfile).replace('fast_working','slow_working'))
+        if len(prev_allsky_img)!=0 and fast_vis:
+            fast_vis_image_model_subtraction=True
+            sky_image=prev_allsky_img[0].split('-image')[0]
+            logging.debug("will use "+sky_image)
+        
         try:
             outms, tmp = sp.image_ms_quick(msfile, calib_ms=None, bcal=bcal_table, do_selfcal=do_selfcal,\
                                         imagename=imagename, logging_level='info', \
                                         num_phase_cal=num_phase_cal, num_apcal=num_apcal,
                                         logfile=logger_file, caltable_folder=caltable_folder, \
                                         do_final_imaging=False, do_fluxscaling=False, freqbin=1, \
-                                        fast_vis=fast_vis, delete_allsky=delete_allsky)
+                                        fast_vis=fast_vis, delete_allsky=delete_allsky,\
+                                        fast_vis_image_model_subtraction=fast_vis_image_model_subtraction,\
+                                        sky_image=sky_image)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
             if os.path.exists(msfile.replace('.ms', '.badants')):
                 os.system('cp '+ msfile.replace('.ms', '.badants') + ' ' + flagdir + '/')
@@ -906,6 +929,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         logging.info('====Processing {0:s}===='.format(timestr))
         
         prev_calfiles=glob.glob(os.path.join(gaintable_folder,"*.gcal"))#### these files will be deleted in this cycle
+        prev_allsky_imgs = glob.glob(os.path.join(visdir_work,'*_allsky-image.fits'))
         
         msfiles_slfcaled = glob.glob(visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
         msfiles_slfcaled.sort()
@@ -924,7 +948,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             logging.debug('Time taken to copy files is {0:.1f} s'.format(time2-time1))
 
 
-            fitsfiles=[]
+            #fitsfiles=[]
             msfiles_slfcaled = []
 
             # parallelized calibration, selfcalibration, and source subtraction
@@ -968,15 +992,19 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                         logging.debug('All sky image exists. Move it to '+allsky_dir_fits_sub)
                         allsky_fitsfile0 = allsky_fitsfile_search[0]
                         allsky_fitsfile = 'ovro-lwa-352.allsky_'+freqstr+'_10s.'+timestr_out + '.image_I.fits'
-                        mvcommand = 'mv ' + allsky_fitsfile0 + ' ' + allsky_dir_fits_sub + allsky_fitsfile
-                        os.system(mvcommand)
+                        cpcommand = 'cp ' + allsky_fitsfile0 + ' ' + allsky_dir_fits_sub + allsky_fitsfile
+                        os.system(cpcommand)
                         allsky_fitsfiles.append(allsky_dir_fits_sub + allsky_fitsfile)
                     else:
-                        logging.info('All sky image {0:s} does not exist.'.format(timestr1 + '_' + freqstr + '*_allsky-image.fits'))
+                        logging.info('All sky image {0:s} does not exist.'.format(\
+                                        visdir_work + '/' + timestr1 + '_' + freqstr + '*_allsky-image.fits'))
+
 
 
                 if delete_working_ms:
-                    os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*')
+                    os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*.ms*')
+                    os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*_self0*')
+                    os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*.cl')
 
             if len(allsky_fitsfiles) > 4:
                 logging.info('Making allsky plots')
@@ -997,8 +1025,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 for file1 in msfiles0_name:
                     timestr1 = utils.get_timestr_from_name(file1)
                     freqstr=utils.get_freqstr_from_name(file1)
-                    os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*')
-
+                    os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*.ms*')
+                    os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*_self0*')
+                    os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*.cl')
 
         # Do imaging
         print('======= processed selfcaled ms files =====')
@@ -1025,11 +1054,13 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                         for file1 in msfiles0_name:
                             timestr1 = utils.get_timestr_from_name(file1)
                             freqstr=utils.get_freqstr_from_name(file1)
-                            os.system('rm -rf '+ visdir_slfcaled + '/' + timestr1 + '_*'+freqstr+'*.ms')
+                            os.system('rm -rf '+ visdir_slfcaled + '/' + timestr1 + '_*'+freqstr+'*')
                             if do_selfcal:
                                 os.system('rm -rf '+ gaintable_folder + '/' + timestr1 + '_*'+freqstr+'*')
                         return False
+           
             fast_vis=check_fast_ms(msfiles_slfcaled[0])
+
 
             if do_imaging:
                 #if fast_vis:
@@ -1051,12 +1082,14 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             return False
 
         new_caltables={}
+        new_allsky_imgs={}
         for file1 in msfiles0_name:
             timestr1 = utils.get_timestr_from_name(file1)
             freqstr=utils.get_freqstr_from_name(file1)
             if delete_ms_slfcaled:
                 os.system('rm -rf '+ visdir_slfcaled + '/' + timestr1 + '_*'+freqstr+'*.ms')
             new_caltables[freqstr]=len(glob.glob(os.path.join(gaintable_folder,timestr1+"_"+freqstr+"*.gcal"))) 
+            new_allsky_imgs[freqstr]=len(glob.glob(os.path.join(visdir_work,timestr1+"_"+freqstr+"*allsky-image.fits")))
                            
         for calfile in prev_calfiles:
             freqstr=utils.get_freqstr_from_name(calfile)
@@ -1068,13 +1101,22 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             except KeyError:
                 pass
         
+        for imgfile in prev_allsky_imgs:
+            freqstr=utils.get_freqstr_from_name(imgfile)
+            try:
+                if new_allsky_imgs[freqstr]!=0 and do_selfcal:
+                    os.system('rm -rf '+imgfile.replace("-image.fits","*"))
+            except KeyError:
+                pass
+        
         if 'fitsfiles' in locals():
+
+            
             if (len(fitsfiles[0]) > 1 and not fast_vis) or (fast_vis and len(fitsfiles[0]) >= 1):
                 datedir = btime.isot[:10].replace('-','/')+'/'
                 
                 # Note the following reorganization is only for synoptic plots and refraction csv files
                 # if UT time is before 4 UT, assign it to the earlier date. 
-    
                 date_mjd = int(btime.mjd)
                 if btime.mjd - date_mjd < 4./24.:
                     datestr_synop = Time(btime.mjd - 1., format='mjd').isot[:10].replace('-','')
@@ -1087,7 +1129,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 
                 if not os.path.exists(fig_mfs_dir_sub_synop):
                     os.makedirs(fig_mfs_dir_sub_synop)
-                    
+                
+                 
                 fits_images, plotted_image = compress_plot_images(fitsfiles, btime, datedir, imagedir_allch_combined, hdf_dir, \
                                         fig_mfs_dir, stokes, fast_vis=fast_vis)
                 
