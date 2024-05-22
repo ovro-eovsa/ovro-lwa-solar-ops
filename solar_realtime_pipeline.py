@@ -34,6 +34,8 @@ import socket,glob
 from matplotlib.patches import Ellipse
 import argparse
 import pandas as pd
+import resource
+import platform
 
 from ovrolwasolar import visualization as ovis
 from ovrolwasolar import refraction_correction as orefr
@@ -44,6 +46,25 @@ msmd = msmetadata()
 qa = quanta()
 me = measures()
 tb = table()
+
+def get_memory():
+    with open('/proc/meminfo', 'r') as mem:
+        free_memory = 0
+        for i in mem:
+            sline = i.split()
+            if str(sline[0]) in ('MemFree:', 'Buffers:', 'Cached:'):
+                free_memory += int(sline[1])
+    return free_memory
+
+def set_memory_limit(percentage=0.03):
+    """
+    Only works in Linux systems
+    """
+    if platform.system() != "Linux":
+        print('Only works on linux!')
+        return
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    resource.setrlimit(resource.RLIMIT_AS, (int(get_memory() * 1024 * percentage), hard))
 
 
 def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
@@ -749,6 +770,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
     time_begin = timeit.default_timer() 
 
+    set_memory_limit()
+
     if slowfast.lower() != 'slow' and slowfast.lower() != 'fast':
         print("slowfast needs to be either 'slow' or 'fast'. Abort")
         return False
@@ -828,44 +851,59 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         print(socket.gethostname(), '=======Processing Time {0:s}======='.format(image_time.isot))
         #logging.info('=======Processing Time {0:s}======='.format(image_time.isot))
         msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s')
-        # check if the currently requested time has enough number of bands
-        if len(msfiles0) < min(min_nband, len(bands)):
-            print('This time only has {0:d} subbands. Check nearby +-10s time.'.format(len(msfiles0)))
-            if slowfast.lower()=='slow':
-                image_time_before = image_time - TimeDelta(10., format='sec')
-                msfiles0_before = list_msfiles(image_time_before, lustre=lustre, server=server, file_path=file_path)
-                image_time_after = image_time + TimeDelta(10., format='sec')
-                msfiles0_after = list_msfiles(image_time_after, lustre=lustre, server=server, file_path=file_path)
-                if len(msfiles0_before) < min(min_nband, len(bands)) and len(msfiles0_after) < min(min_nband, len(bands)):
-                    print('I cannot find a nearby time with at least {0:d} available subbands. Abort and wait for next time interval.'.format(min_nband))
-                    return False
-                else:
-                    if len(msfiles0_before) > len(msfiles0_after):
-                        msfiles0 = msfiles0_before
-                        image_time = image_time_before
-                    else:
-                        msfiles0 = msfiles0_after
-                        image_time = image_time_after
-            else:
-                print('I cannot find a nearby time with at least {0:d} available subbands. Abort and wait for next time interval.'.format(min_nband))
-                return False
-
         msfiles0_ts = [f['time'] for f in msfiles0]
         msfiles0_tref = Time(np.median(Time(msfiles0_ts).mjd), format='mjd')
         if len(msfiles0) < len(bands):
             # try to find missing times from nearby times that are +-4 s within the reference time
             msfiles0_before = list_msfiles(image_time - TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
-            msfiles0_before_ts = [f['time'] for f in msfiles0_before]
+            if len(msfiles0_before) > 0:
+                msfiles0_before_ts = [f['time'] for f in msfiles0_before]
+            else:
+                msfiles0_before_ts = []
             msfiles0_after = list_msfiles(image_time + TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
-            msfiles0_after_ts = [f['time'] for f in msfiles0_after]
+            if len(msfiles0_after) > 0:
+                msfiles0_after_ts = [f['time'] for f in msfiles0_after]
+            else:
+                msfiles0_after_ts = []
             msfiles0_all = msfiles0_before + msfiles0 + msfiles0_after
             msfiles0_all_ts = msfiles0_before_ts + msfiles0_ts + msfiles0_after_ts
-            idxs, = np.where(np.abs((Time(msfiles0_all_ts).mjd - msfiles0_tref.mjd)) < 4./86400.)
-            msfiles0 = [msfiles0_all[idx] for idx in idxs]
+            if len(msfiles0_all) > 0:
+                idxs, = np.where(np.abs((Time(msfiles0_all_ts).mjd - msfiles0_tref.mjd)) < 4./86400.)
+                msfiles0 = [msfiles0_all[idx] for idx in idxs]
+            else:
+                logging.info('I cannot find any available subbands. Abort and wait for next time interval.')
+                return False
+
+
+        # check if the currently requested time has enough number of bands
+        if len(msfiles0) < min(min_nband, len(bands)):
+            #print('This time only has {0:d} subbands. Check nearby +-10s time.'.format(len(msfiles0)))
+            #if slowfast.lower()=='slow':
+            #    image_time_before = image_time - TimeDelta(10., format='sec')
+            #    msfiles0_before = list_msfiles(image_time_before, lustre=lustre, server=server, file_path=file_path)
+            #    image_time_after = image_time + TimeDelta(10., format='sec')
+            #    msfiles0_after = list_msfiles(image_time_after, lustre=lustre, server=server, file_path=file_path)
+            #    if len(msfiles0_before) < min(min_nband, len(bands)) and len(msfiles0_after) < min(min_nband, len(bands)):
+            #        print('I cannot find a nearby time with at least {0:d} available subbands. Abort and wait for next time interval.'.format(min_nband))
+            #        return False
+            #    else:
+            #        if len(msfiles0_before) > len(msfiles0_after):
+            #            msfiles0 = msfiles0_before
+            #            image_time = image_time_before
+            #        else:
+            #            msfiles0 = msfiles0_after
+            #            image_time = image_time_after
+            #else:
+            #    print('I cannot find a nearby time with at least {0:d} available subbands. Abort and wait for next time interval.'.format(min_nband))
+            #    return False
+            logging.info('I cannot find at least {0:d} available subbands. Abort and wait for next time interval.'.format(min_nband))
+            return False
+
         
         msfiles0_freq = [f['freq'] for f in msfiles0]
         msfiles0_name = [f['name'] for f in msfiles0]
         timestr = msfiles0_name[0][:15]
+        logging.info('====Processing {0:s}===='.format(timestr))
         
         prev_calfiles=glob.glob(os.path.join(gaintable_folder,"*.gcal"))#### these files will be deleted in this cycle
         
@@ -934,7 +972,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                         os.system(mvcommand)
                         allsky_fitsfiles.append(allsky_dir_fits_sub + allsky_fitsfile)
                     else:
-                        logging.info('All sky image {0:s} does not exist.'.format(allsky_fitsfile_search))
+                        logging.info('All sky image {0:s} does not exist.'.format(timestr1 + '_' + freqstr + '*_allsky-image.fits'))
 
 
                 if delete_working_ms:
@@ -1090,19 +1128,26 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 logging.debug('====All processing for time {0:s} is done in {1:.1f} minutes'.format(timestr, (time_completed-time_begin)/60.))
                 return True
             else:
+                if delete_working_fits:
+                    os.system('rm -rf '+imagedir_allch + '*')
                 time_exit = timeit.default_timer()
                 logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(timestr, (time_exit-time_begin)/60.))
                 return False
         elif do_imaging:
+            if delete_working_fits:
+                os.system('rm -rf '+imagedir_allch + '*')
             time_exit = timeit.default_timer()
             logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(timestr, (time_exit-time_begin)/60.))
             return False
         else:
+            if delete_working_fits:
+                os.system('rm -rf '+imagedir_allch + '*')
             time_completed= timeit.default_timer() 
             logging.debug('====All processing for time {0:s} is done in {1:.1f} minutes'.format(timestr, (time_completed-time_begin)/60.))
             return True
     except Exception as e:
         logging.error(e)
+        os.system('rm -rf '+imagedir_allch + '*')
         time_exit = timeit.default_timer()
         logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(timestr, (time_exit-time_begin)/60.))
         return False
@@ -1425,7 +1470,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 format='%(asctime)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
                 level=logger_level,
                 datefmt='%Y-%m-%d %H:%M:%S', force=True)
-            sleep(twait.sec + 60. + delay_by_node)
+            if twait.sec > 0:
+                sleep(twait.sec + 60. + delay_by_node)
 
 
 
@@ -1478,6 +1524,7 @@ if __name__=='__main__':
 
     if args.slowfast.lower() == 'fast':
         do_selfcal=False
+        delay=200.
     elif args.slowfast.lower() == 'slow' and args.no_selfcal:
         do_selfcal=False
     else:
