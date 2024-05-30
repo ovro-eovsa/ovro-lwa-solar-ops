@@ -1070,7 +1070,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 #if fast_vis:
                 #    nch_out=1
                 fitsfiles=image_times(msfiles_slfcaled,imagedir_allch, nch_out=nch_out, \
-                                   stokes=stokes, beam_fit_size=beam_fit_size)
+                                   stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
             btime = Time(trange['begin']['m0']['value'], format='mjd')
 
 
@@ -1198,7 +1198,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         return False
 
 
-def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_fit_size=2):
+def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_fit_size=2, briggs=-0.5):
     msfiles_slfcaled_success = []
     for m in msfiles_slfcaled:
         if type(m) is str:
@@ -1218,7 +1218,7 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     ephem = hf.read_horizons(tref, dur=1./60./24., observatory='OVRO_MMA')
     pool = multiprocessing.pool.Pool(processes=len(msfiles_slfcaled_success))
     run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, \
-                nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size)
+                nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
     results = pool.map_async(run_imager_partial, msfiles_slfcaled_success)
     timeout = 200.
     results.wait(timeout=timeout)
