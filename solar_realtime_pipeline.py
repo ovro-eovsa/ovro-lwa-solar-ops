@@ -56,7 +56,7 @@ def get_memory():
                 free_memory += int(sline[1])
     return free_memory
 
-def set_memory_limit(percentage=0.03):
+def set_memory_limit(percentage=0.1):
     """
     Only works in Linux systems
     """
@@ -874,8 +874,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         print(socket.gethostname(), '=======Processing Time {0:s}======='.format(image_time.isot))
         #logging.info('=======Processing Time {0:s}======='.format(image_time.isot))
         msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s')
-        msfiles0_ts = [f['time'] for f in msfiles0]
-        msfiles0_tref = Time(np.median(Time(msfiles0_ts).mjd), format='mjd')
+        
         if len(msfiles0) < len(bands):
             # try to find missing times from nearby times that are +-4 s within the reference time
             msfiles0_before = list_msfiles(image_time - TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
@@ -889,8 +888,11 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             else:
                 msfiles0_after_ts = []
             msfiles0_all = msfiles0_before + msfiles0 + msfiles0_after
-            msfiles0_all_ts = msfiles0_before_ts + msfiles0_ts + msfiles0_after_ts
+            
             if len(msfiles0_all) > 0:
+                msfiles0_ts = [f['time'] for f in msfiles0]
+                msfiles0_tref = Time(np.median(Time(msfiles0_ts).mjd), format='mjd')
+                msfiles0_all_ts = msfiles0_before_ts + msfiles0_ts + msfiles0_after_ts
                 idxs, = np.where(np.abs((Time(msfiles0_all_ts).mjd - msfiles0_tref.mjd)) < 4./86400.)
                 msfiles0 = [msfiles0_all[idx] for idx in idxs]
             else:
@@ -1110,9 +1112,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 pass
         
         if 'fitsfiles' in locals():
-
-            
-            if (len(fitsfiles[0]) > 1 and not fast_vis) or (fast_vis and len(fitsfiles[0]) >= 1):
+            if len(fitsfiles[0]) > 1:
                 datedir = btime.isot[:10].replace('-','/')+'/'
                 
                 # Note the following reorganization is only for synoptic plots and refraction csv files
@@ -1144,7 +1144,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                             refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
                             logging.info("Trying to do refraction correction")
 
-                            refra_image,success=do_refraction_correction(fits_images, overbright, \
+                            refra_image, success=do_refraction_correction(fits_images, overbright, \
                                                         refrafile, datedir, imagedir_allch_combined, hdf_dir, \
                                                         fig_mfs_dir,btime)
                             if not success:
@@ -1156,10 +1156,10 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                                 figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs', '.synop_mfs')
                       
                     if not figname_to_copy:
-                        figname_to_copy=plotted_image
+                        figname_to_copy = plotted_image
                         figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
                 else:
-                    figname_to_copy=plotted_image
+                    figname_to_copy = plotted_image
                     figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
 
                 synoptic_image=os.path.join(fig_mfs_dir_sub_synop, figname_synop)    
@@ -1192,7 +1192,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         logging.error(e)
         os.system('rm -rf '+imagedir_allch + '*')
         time_exit = timeit.default_timer()
-        logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(timestr, (time_exit-time_begin)/60.))
+        logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(image_time.isot, (time_exit-time_begin)/60.))
         return False
 
 
@@ -1321,7 +1321,7 @@ def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir
     if not os.path.exists(hdf_dir_sub_lv15):
        os.makedirs(hdf_dir_sub_lv15)
    
-    fits_mfs,fits_fch=fitsfiles
+    fits_mfs, fits_fch=fitsfiles
 
     px, py = orefr.refraction_fit_param(fits_fch, overbright=overbright)
 
@@ -1373,7 +1373,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         briggs=-0.5,
         delete_working_ms=True, do_refra=True, delete_working_fits=True,
         do_imaging=True, delete_allsky=True,
-        bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
+        bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
+        stop_at_sunset=True):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -1396,6 +1397,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     :param briggs: briggs weighting parameter to be passed to wsclean. -1 is close to uniform and 1 is close to natural. See https://wsclean.readthedocs.io/en/latest/image_weighting.html
     :param do_imaging: If True (default), will do imaging. Otherwise just do all steps prior to imaging.
     :param bands: list of frequency bands to process. Can be a subset of the full list ['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']
+    :param stop_at_sunset: if False, the program will attempt to continue across days untile being killed, otherwise it will exist after sunset.
     '''
     try:
         time_start = Time(time_start)
@@ -1497,25 +1499,30 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
 
             if slowfast.lower() == 'fast':
                 twait += TimeDelta(600., format='sec') 
-            time_start += TimeDelta(twait.sec + 60. + delay_by_node, format='sec')
-            t_rise = t_rise_next
-            t_set = t_set_next
-            # updating the logger file
-            datestr = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','')
-            datedir = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','/') + '/'
-            logger_file = logger_dir + datedir + logger_prefix + '_' + slowfast + '_'+ datestr + '_' + server_runtime + '.log'  
 
-            if not os.path.exists(os.path.dirname(logger_file)):
-                print('Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
-                os.makedirs(os.path.dirname(logger_file))
+            if stop_at_sunset:
+                break
+            else:
+                time_start += TimeDelta(twait.sec + 60. + delay_by_node, format='sec')
+                logging.info('{0:s}: Next time to image is {1:s} .'.format(socket.gethostname(), time_start.isot)) 
+                t_rise = t_rise_next
+                t_set = t_set_next
+                # updating the logger file
+                datestr = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','')
+                datedir = Time(t_rise.mjd, format='mjd').isot[:10].replace('-','/') + '/'
+                logger_file = logger_dir + datedir + logger_prefix + '_' + slowfast + '_'+ datestr + '_' + server_runtime + '.log'  
 
-            logging.basicConfig(filename=logger_file, filemode='at',
-                format='%(asctime)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
-                level=logger_level,
-                datefmt='%Y-%m-%d %H:%M:%S', force=True)
-            if twait.sec > 0:
-                sleep(twait.sec + 60. + delay_by_node)
+                if not os.path.exists(os.path.dirname(logger_file)):
+                    print('Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
+                    os.makedirs(os.path.dirname(logger_file))
 
+                logging.basicConfig(filename=logger_file, filemode='at',
+                    format='%(asctime)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
+                    level=logger_level,
+                    datefmt='%Y-%m-%d %H:%M:%S', force=True)
+
+                if twait.sec > 0:
+                    sleep(twait.sec + 60. + delay_by_node)
 
 
 if __name__=='__main__':
@@ -1530,7 +1537,7 @@ if __name__=='__main__':
         pdsh -w lwacalim[00-09] 'pkill -u bin.chen -f python'
     """
     parser = argparse.ArgumentParser(description='Solar realtime pipeline')
-    parser.add_argument('prefix', type=str, help='Timestamp for the start time. Format YYYY-MM-DDTHH:MM')
+    parser.add_argument('--start_time', default=Time.now().isot, type=str, help='Timestamp for the start time. Format YYYY-MM-DDTHH:MM')
     parser.add_argument('--end_time', default='2030-01-01T00:00', help='End time in format YYYY-MM-DDTHH:MM')
     parser.add_argument('--interval', default=600., help='Time interval in seconds')
     parser.add_argument('--nodes', default='0123456789', help='List of nodes to use')
@@ -1555,6 +1562,7 @@ if __name__=='__main__':
     parser.add_argument('--keep_allsky', default=False, help='If True, keep the band-averaged all sky images', action='store_true')
     parser.add_argument('--no_selfcal', default=False, help='If set, do not do selfcal regardless slow or fast', action='store_true')
     parser.add_argument('--no_imaging', default=False, help='If set, do not perform imaging', action='store_true')
+    parser.add_argument('--nonstop', default=False, help='If set, the script will be run without stopping', action='store_true')
     parser.add_argument('--sleep_time', default=0.0, help='Process will sleep for these seconds before doing anything')
     parser.add_argument('--slowfast', default='slow', help='Specify slow or fast visibility data to be processed')
     parser.add_argument('--bands', '--item', action='store', dest='bands',
@@ -1586,13 +1594,13 @@ if __name__=='__main__':
             sys.exit(0)
 
     try:
-        run_pipeline(args.prefix, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=args.nodes, delay_from_now=float(args.delay),
+        run_pipeline(time_start=args.start_time, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=args.nodes, delay_from_now=float(args.delay),
                      server=args.server, lustre=(not args.nolustre), file_path=args.file_path,
                      proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
                      altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
                      do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
                      delete_working_fits=(not args.keep_working_fits), delete_allsky=(not args.keep_allsky), beam_fit_size=args.bmfit_sz, briggs=args.briggs,
-                     do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast)
+                     do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop))
     except Exception as e:
         logging.error(e)
         raise e
