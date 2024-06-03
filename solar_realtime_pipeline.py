@@ -760,7 +760,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
             calib_file = '20240117_145752',
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6,
-            slowfast='slow', do_imaging=True, delete_allsky=True,
+            slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
             bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
     """
     Pipeline for processing and imaging slow visibility data
@@ -789,6 +789,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     :param delete_working_ms: if True, delete the working ms files after imaging (set False for debugging purpose)
     :param overbright: peak brightness temperature exceeding this value (in Kelvin) will be excluded for refraction correction fitting
     :param slowfast: specify whether slow or fast visibilities are being processed
+    :param delete_allsky: if True, delete the allsky image after each run. Otherwise keep the latest frame. 
+    :param save_allsky: if True, save the allsky image FITS file into save_dir + 'allsky/'
     """
 
     time_begin = timeit.default_timer() 
@@ -984,7 +986,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             for file1 in msfiles0_name:
                 timestr1 = utils.get_timestr_from_name(file1)
                 freqstr=utils.get_freqstr_from_name(file1)
-                if not delete_allsky and slowfast.lower()=='slow':
+                if save_allsky and slowfast.lower()=='slow':
                     allsky_dir_fits_sub = allsky_dir_fits + '/'+ timestr1[0:4]+'/'+timestr1[4:6]+'/'+timestr1[6:8]+'/'
                     if not os.path.exists(allsky_dir_fits_sub):
                         os.makedirs(allsky_dir_fits_sub)
@@ -1068,7 +1070,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 #if fast_vis:
                 #    nch_out=1
                 fitsfiles=image_times(msfiles_slfcaled,imagedir_allch, nch_out=nch_out, \
-                                   stokes=stokes, beam_fit_size=beam_fit_size)
+                                   stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
             btime = Time(trange['begin']['m0']['value'], format='mjd')
 
 
@@ -1196,7 +1198,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         return False
 
 
-def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_fit_size=2):
+def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_fit_size=2, briggs=-0.5):
     msfiles_slfcaled_success = []
     for m in msfiles_slfcaled:
         if type(m) is str:
@@ -1216,7 +1218,7 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     ephem = hf.read_horizons(tref, dur=1./60./24., observatory='OVRO_MMA')
     pool = multiprocessing.pool.Pool(processes=len(msfiles_slfcaled_success))
     run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, \
-                nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size)
+                nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
     results = pool.map_async(run_imager_partial, msfiles_slfcaled_success)
     timeout = 200.
     results.wait(timeout=timeout)
@@ -1372,7 +1374,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         beam_fit_size = 2,
         briggs=-0.5,
         delete_working_ms=True, do_refra=True, delete_working_fits=True,
-        do_imaging=True, delete_allsky=True,
+        do_imaging=True, delete_allsky=False, save_allsky=False,
         bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
         stop_at_sunset=True):
     '''
@@ -1398,6 +1400,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     :param do_imaging: If True (default), will do imaging. Otherwise just do all steps prior to imaging.
     :param bands: list of frequency bands to process. Can be a subset of the full list ['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']
     :param stop_at_sunset: if False, the program will attempt to continue across days untile being killed, otherwise it will exist after sunset.
+    :param delete_allsky: if True, delete the allsky image after each run. Otherwise keep the latest frame. 
+    :param save_allsky: if True, save the allsky image FITS file into save_dir + 'allsky/'
     '''
     try:
         time_start = Time(time_start)
@@ -1467,7 +1471,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                             logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, 
                             calib_file=calib_file, delete_working_ms=delete_working_ms,
                             delete_working_fits=delete_working_fits, do_refra=do_refra,
-                            beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky)
+                            beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky, save_allsky=save_allsky)
 
         time2 = timeit.default_timer()
         if res:
@@ -1559,7 +1563,7 @@ if __name__=='__main__':
     parser.add_argument('--logger_level', default=10, help='Specify logging level. Default to 10 (debug)')   
     parser.add_argument('--keep_working_ms', default=False, help='If True, keep the working ms files after imaging', action='store_true')
     parser.add_argument('--keep_working_fits', default=False, help='If True, keep the working fits files after imaging', action='store_true')
-    parser.add_argument('--keep_allsky', default=False, help='If True, keep the band-averaged all sky images', action='store_true')
+    parser.add_argument('--save_allsky', default=False, help='If True, save the band-averaged all sky images', action='store_true')
     parser.add_argument('--no_selfcal', default=False, help='If set, do not do selfcal regardless slow or fast', action='store_true')
     parser.add_argument('--no_imaging', default=False, help='If set, do not perform imaging', action='store_true')
     parser.add_argument('--nonstop', default=False, help='If set, the script will be run without stopping', action='store_true')
@@ -1599,7 +1603,7 @@ if __name__=='__main__':
                      proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
                      altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
                      do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
-                     delete_working_fits=(not args.keep_working_fits), delete_allsky=(not args.keep_allsky), beam_fit_size=args.bmfit_sz, briggs=args.briggs,
+                     delete_working_fits=(not args.keep_working_fits), save_allsky=args.save_allsky, beam_fit_size=args.bmfit_sz, briggs=args.briggs,
                      do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop))
     except Exception as e:
         logging.error(e)
