@@ -147,7 +147,8 @@ def list_msfiles_old(intime, server='lwacalim', distributed=True, file_path='slo
     return msfiles
 
 def list_msfiles(intime, lustre=True, file_path='slow', server=None, time_interval='10s', 
-                 bands=['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
+                 bands=['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
+                 delay=60):
     """
     Return a list of visibilities to be copied for pipeline processing for a given time
     :param intime: astropy Time object
@@ -180,6 +181,18 @@ def list_msfiles(intime, lustre=True, file_path='slow', server=None, time_interv
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
             processes.append(p)
             filenames = p.communicate()[0].decode('utf-8').split('\n')[:-1]
+            
+            while len(filenames)==0:
+                current_time=Time.now()
+                diff=current_time-intimestr
+                seconds=diff.value*86400
+                if seconds<delay:
+                    sleep(2)
+                    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+                    processes.append(p)
+                    filenames = p.communicate()[0].decode('utf-8').split('\n')[:-1]
+                else:
+                    break
             if len(filenames) > 0:
                 for filename in filenames:
                     if filename[-6:] == 'MHz.ms':
@@ -761,7 +774,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             calib_file = '20240117_145752',
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
-            bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
+            bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
+            delay=60):
     """
     Pipeline for processing and imaging slow visibility data
     :param time_start: start time of the visibility data to be processed
@@ -875,16 +889,16 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     try:
         print(socket.gethostname(), '=======Processing Time {0:s}======='.format(image_time.isot))
         #logging.info('=======Processing Time {0:s}======='.format(image_time.isot))
-        msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s')
+        msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s', delay=delay)
         
         if len(msfiles0) < len(bands):
             # try to find missing times from nearby times that are +-4 s within the reference time
-            msfiles0_before = list_msfiles(image_time - TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
+            msfiles0_before = list_msfiles(image_time - TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s', delay=delay)
             if len(msfiles0_before) > 0:
                 msfiles0_before_ts = [f['time'] for f in msfiles0_before]
             else:
                 msfiles0_before_ts = []
-            msfiles0_after = list_msfiles(image_time + TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
+            msfiles0_after = list_msfiles(image_time + TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s', delay=delay)
             if len(msfiles0_after) > 0:
                 msfiles0_after_ts = [f['time'] for f in msfiles0_after]
             else:
@@ -1471,7 +1485,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                             logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, 
                             calib_file=calib_file, delete_working_ms=delete_working_ms,
                             delete_working_fits=delete_working_fits, do_refra=do_refra,
-                            beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky, save_allsky=save_allsky)
+                            beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky, save_allsky=save_allsky, delay=delay_from_now)
 
         time2 = timeit.default_timer()
         if res:
