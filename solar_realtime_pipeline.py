@@ -603,8 +603,9 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
             logging.error('No fits images produced.')
             return -1
     except Exception as e:
-        wsclean_proc.terminate()
         logging.error(e)
+        if wsclean_proc.poll() is None:
+            wsclean_proc.terminate()
         return -1
 
 
@@ -1282,7 +1283,10 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     ndfits.wrap(fitsfiles_mfs, outfitsfile=fits_mfs)
     
     hdf_mfs = hdf_dir_sub_lv10 + os.path.basename(fits_mfs).replace('.fits', '.hdf')
-    utils.compress_fits_to_h5(fits_mfs, hdf_mfs)
+    if fast_vis:
+        utils.compress_fits_to_h5(fits_mfs, hdf_mfs, purge_corrupted=True)
+    else:
+        utils.compress_fits_to_h5(fits_mfs, hdf_mfs, purge_corrupted=False)
     
     #if not fast_vis:
     # fine channel spectral images
@@ -1296,7 +1300,10 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     fitsfiles_fch.sort()
     ndfits.wrap(fitsfiles_fch, outfitsfile=fits_fch)
     hdf_fch = hdf_dir_sub_lv10 + os.path.basename(fits_fch).replace('.fits', '.hdf')
-    utils.compress_fits_to_h5(fits_fch, hdf_fch)
+    if fast_vis:
+        utils.compress_fits_to_h5(fits_fch, hdf_fch, purge_corrupted=True)
+    else:
+        utils.compress_fits_to_h5(fits_fch, hdf_fch, purge_corrupted=False)
     
     fig, axes = ovis.slow_pipeline_default_plot(fits_mfs)
     figname_lv10 = os.path.basename(fits_mfs).replace('.fits', '.png')
@@ -1549,16 +1556,16 @@ if __name__=='__main__':
     parser.add_argument('--server', default=None, help='Name of the server where the raw data is located. Must be defined in ~/.ssh/config.')
     parser.add_argument('--nolustre', default=False, help='If set, do NOT assume that the data are stored under /lustre/pipeline/ in the default tree', action='store_true')
     parser.add_argument('--file_path', default='slow/', help='Specify where the raw data is located')
-    parser.add_argument('--proc_dir', default='/fast/bin.chen/realtime_pipeline/', help='Directory for processing')
-    parser.add_argument('--save_dir', default='/lustre/bin.chen/realtime_pipeline/', help='Directory for saving fits files')
-    parser.add_argument('--calib_dir', default='/lustre/bin.chen/realtime_pipeline/caltables/', help='Directory to calibration tables')
+    parser.add_argument('--proc_dir', default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
+    parser.add_argument('--save_dir', default='/lustre/solarpipe/realtime_pipeline/', help='Directory for saving fits files')
+    parser.add_argument('--calib_dir', default='/lustre/solarpipe/realtime_pipeline/caltables/', help='Directory to calibration tables')
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
     parser.add_argument('--alt_limit', default=15., help='Lowest solar altitude to start/end imaging')
     parser.add_argument('--bmfit_sz', default=2, help='Beam fitting size to be passed to wsclean')
     parser.add_argument('--briggs', default=-0.5, help='Briggs weighting parameter to be passed to wsclean')
     parser.add_argument('--do_refra', default=True, help='If True, do refraction correction', action='store_true')
     parser.add_argument('--singlenode', default=False, help='If True, delay the start time by the node', action='store_true')
-    parser.add_argument('--logger_dir', default='/lustre/bin.chen/realtime_pipeline/logs/', help='Directory for logger files')
+    parser.add_argument('--logger_dir', default='/lustre/solarpipe/realtime_pipeline/logs/', help='Directory for logger files')
     parser.add_argument('--logger_prefix', default='solar_realtime_pipeline', help='Prefix for logger file')
     parser.add_argument('--logger_level', default=10, help='Specify logging level. Default to 10 (debug)')   
     parser.add_argument('--keep_working_ms', default=False, help='If True, keep the working ms files after imaging', action='store_true')
