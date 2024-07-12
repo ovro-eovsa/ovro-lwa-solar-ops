@@ -972,9 +972,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky)
             result = pool.map_async(run_calib_partial, msfiles)
             if slowfast.lower()=='slow':
-                timeout = 800.
+                timeout = 1200.
             else:
-                timeout = 200.
+                timeout = 300.
             result.wait(timeout=timeout)
             if result.ready():
                 msfiles_slfcaled = result.get()
@@ -984,7 +984,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
                 pool.terminate()
-                msfiles_slfcaled = [] 
+                msfiles_slfcaled = result.get()
+                #msfiles_slfcaled = [] 
 
             pool.close()
             pool.join()
@@ -1121,69 +1122,72 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 pass
         
         if 'fitsfiles' in locals():
-            if len(fitsfiles[0]) > 1:
-                datedir = btime.isot[:10].replace('-','/')+'/'
-                
-                # Note the following reorganization is only for synoptic plots and refraction csv files
-                # if UT time is before 4 UT, assign it to the earlier date. 
-                date_mjd = int(btime.mjd)
-                if btime.mjd - date_mjd < 4./24.:
-                    datestr_synop = Time(btime.mjd - 1., format='mjd').isot[:10].replace('-','')
-                    datedir_synop = Time(btime.mjd - 1., format='mjd').isot[:10].replace('-','/') + '/'
-                else:
-                    datestr_synop = Time(btime.mjd, format='mjd').isot[:10].replace('-','')
-                    datedir_synop = Time(btime.mjd, format='mjd').isot[:10].replace('-','/') + '/'
+            if len(fitsfiles) > 0:
+                if len(fitsfiles[0]) > 1:
+                    datedir = btime.isot[:10].replace('-','/')+'/'
                     
-                fig_mfs_dir_sub_synop = fig_mfs_dir + '/synop/' + datedir_synop
-                
-                if not os.path.exists(fig_mfs_dir_sub_synop):
-                    os.makedirs(fig_mfs_dir_sub_synop)
-                
-                 
-                fits_images, plotted_image = compress_plot_images(fitsfiles, btime, datedir, imagedir_allch_combined, hdf_dir, \
-                                        fig_mfs_dir, stokes, fast_vis=fast_vis)
-                
-                logging.info("Level 1 images plotted ok")
-                figname_to_copy=None
-                
-                # Do refraction corrections
-                if not fast_vis:    
-                    if len(fits_images)==2:  #### 0  is mfs, 1 in fine channel
-                        if do_refra:
-                            refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
-                            logging.info("Trying to do refraction correction")
+                    # Note the following reorganization is only for synoptic plots and refraction csv files
+                    # if UT time is before 4 UT, assign it to the earlier date. 
+                    date_mjd = int(btime.mjd)
+                    if btime.mjd - date_mjd < 4./24.:
+                        datestr_synop = Time(btime.mjd - 1., format='mjd').isot[:10].replace('-','')
+                        datedir_synop = Time(btime.mjd - 1., format='mjd').isot[:10].replace('-','/') + '/'
+                    else:
+                        datestr_synop = Time(btime.mjd, format='mjd').isot[:10].replace('-','')
+                        datedir_synop = Time(btime.mjd, format='mjd').isot[:10].replace('-','/') + '/'
+                        
+                    fig_mfs_dir_sub_synop = fig_mfs_dir + '/synop/' + datedir_synop
+                    
+                    if not os.path.exists(fig_mfs_dir_sub_synop):
+                        os.makedirs(fig_mfs_dir_sub_synop)
+                    
+                     
+                    fits_images, plotted_image = compress_plot_images(fitsfiles, btime, datedir, imagedir_allch_combined, hdf_dir, \
+                                            fig_mfs_dir, stokes, fast_vis=fast_vis)
+                    
+                    logging.info("Level 1 images plotted ok")
+                    figname_to_copy=None
+                    
+                    # Do refraction corrections
+                    if not fast_vis:    
+                        if len(fits_images)==2:  #### 0  is mfs, 1 in fine channel
+                            if do_refra:
+                                refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
+                                logging.info("Trying to do refraction correction")
 
-                            refra_image, success=do_refraction_correction(fits_images, overbright, \
-                                                        refrafile, datedir, imagedir_allch_combined, hdf_dir, \
-                                                        fig_mfs_dir,btime)
-                            if not success:
-                                logging.info('Refraction correction failed for '+ btime.isot)
-                                figname_to_copy=plotted_image
-                                figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs', '.synop_mfs')    
-                            else:
-                                figname_to_copy=refra_image
-                                figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs', '.synop_mfs')
-                      
-                    if not figname_to_copy:
+                                refra_image, success=do_refraction_correction(fits_images, overbright, \
+                                                            refrafile, datedir, imagedir_allch_combined, hdf_dir, \
+                                                            fig_mfs_dir,btime)
+                                if not success:
+                                    logging.info('Refraction correction failed for '+ btime.isot)
+                                    figname_to_copy=plotted_image
+                                    figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs', '.synop_mfs')    
+                                else:
+                                    figname_to_copy=refra_image
+                                    figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs', '.synop_mfs')
+                          
+                        if not figname_to_copy:
+                            figname_to_copy = plotted_image
+                            figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
+                    else:
                         figname_to_copy = plotted_image
                         figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
-                else:
-                    figname_to_copy = plotted_image
-                    figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
 
-                synoptic_image=os.path.join(fig_mfs_dir_sub_synop, figname_synop)    
-                os.system('cp '+ figname_to_copy + ' ' + synoptic_image)   
-                
-                if delete_working_fits:
-                    os.system('rm -rf '+imagedir_allch + '*')
-                time_completed= timeit.default_timer() 
-                logging.debug('====All processing for time {0:s} is done in {1:.1f} minutes'.format(timestr, (time_completed-time_begin)/60.))
-                return True
+                    synoptic_image=os.path.join(fig_mfs_dir_sub_synop, figname_synop)    
+                    os.system('cp '+ figname_to_copy + ' ' + synoptic_image)   
+                    
+                    if delete_working_fits:
+                        os.system('rm -rf '+imagedir_allch + '*')
+                    time_completed= timeit.default_timer() 
+                    logging.debug('====All processing for time {0:s} is done in {1:.1f} minutes'.format(timestr, (time_completed-time_begin)/60.))
+                    return True
+                else:
+                    if delete_working_fits:
+                        os.system('rm -rf '+imagedir_allch + '*')
+                    time_exit = timeit.default_timer()
+                    logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(timestr, (time_exit-time_begin)/60.))
+                    return False
             else:
-                if delete_working_fits:
-                    os.system('rm -rf '+imagedir_allch + '*')
-                time_exit = timeit.default_timer()
-                logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(timestr, (time_exit-time_begin)/60.))
                 return False
         elif do_imaging:
             if delete_working_fits:
@@ -1227,7 +1231,7 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, \
                 nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
     results = pool.map_async(run_imager_partial, msfiles_slfcaled_success)
-    timeout = 200.
+    timeout = 300.
     results.wait(timeout=timeout)
     if results.ready():
         fitsfiles = results.get()
@@ -1237,7 +1241,8 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
         logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
         logging.debug('Proceed anyway')
         pool.terminate()
-        fitsfiles = []
+        #fitsfiles = []
+        fitsfiles = results.get()
             
     pool.close()
     pool.join()
