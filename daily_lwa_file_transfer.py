@@ -257,13 +257,14 @@ if __name__ == "__main__":
     parser.add_argument('--plots', default=False, help='If set, copy and organize quicklook spectrogram and image plots', action='store_true')
     parser.add_argument('--beam', default=False, help='If set, copy and organize beam data', action='store_true')
     parser.add_argument('--hdf', default=False, help='If set, copy and organize image fits and hdf data', action='store_true')
+    parser.add_argument('--ndays', default=2, help='Number of days prior to given time to transfer data')
     timestr = Time.now().iso
-    # ndays is the number of days to go back in time for checking the existence of data
     args = parser.parse_args()
+    ndays = int(args.ndays)
     if args.plots:
-        copy_1min_plots(timestr, ndays=2)
+        copy_1min_plots(timestr, ndays=ndays)
     if args.beam:
-        copy_beam_data(timestr, ndays=2)
+        copy_beam_data(timestr, ndays=ndays)
     if args.hdf:
-        copy_hdf_data(timestr, ndays=2)
+        copy_hdf_data(timestr, ndays=ndays)
     exit()
