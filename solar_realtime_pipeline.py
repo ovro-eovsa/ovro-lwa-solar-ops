@@ -190,7 +190,6 @@ def list_msfiles(intime, lustre=True, file_path='slow', server=None, time_interv
                         msfiles.append({'path': filestr, 'name': filename, 'time': timestr, 'freq': freqstr})
             else:
                 logging.info('Did not find any files at the given time {0:s}.'.format(intime.isot)) 
-                msfiles=[]
     else:
         if server:
             cmd = 'ssh ' + server + ' ls ' + file_path + ' | grep ' + tstr
