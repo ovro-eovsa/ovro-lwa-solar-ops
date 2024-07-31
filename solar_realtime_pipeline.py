@@ -969,7 +969,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky)
 
             if slowfast.lower()=='slow':
-                timeout = 1200.
+                timeout = 800.
             else:
                 timeout = 300.
             
