@@ -958,36 +958,28 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             logging.debug('Time taken to copy files is {0:.1f} s'.format(time2-time1))
 
 
-            #fitsfiles=[]
-            msfiles_slfcaled = []
-
+            
             # parallelized calibration, selfcalibration, and source subtraction
             logging.debug('Starting to calibrate all {0:d} bands'.format(len(msfiles)))
             time_cal1 = timeit.default_timer()
-            pool = multiprocessing.pool.Pool(processes=len(msfiles))
+
             #result = pool.map_async(run_calib, msfiles)
             run_calib_partial = partial(run_calib, msfiles_cal=msfiles_cal, bcal_tables=bcal_tables, do_selfcal=do_selfcal, 
                     num_phase_cal=num_phase_cal, num_apcal=num_apcal, logger_file=logger_file, caltable_folder=gaintable_folder, 
                     visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky)
-            result = pool.map_async(run_calib_partial, msfiles)
+
             if slowfast.lower()=='slow':
-                timeout = 1200.
+                timeout = 800.
             else:
                 timeout = 300.
-            result.wait(timeout=timeout)
-            if result.ready():
-                msfiles_slfcaled = result.get()
+            
+            msfiles_slfcaled=parallel_task_runner(run_calib_partial,msfiles,timeout=timeout)
+            if len(msfiles_slfcaled)==len(msfiles):
                 time_cal2 = timeit.default_timer()
                 logging.debug('Calibration for all {0:d} bands is done in {1:.1f} s'.format(len(msfiles), time_cal2-time_cal1))
             else:
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
-                pool.terminate()
-                #msfiles_slfcaled = result.get()
-                msfiles_slfcaled = [] 
-
-            pool.close()
-            pool.join()
             
             allsky_fitsfiles=[]
             for file1 in msfiles0_name:
@@ -1207,6 +1199,38 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(image_time.isot, (time_exit-time_begin)/60.))
         return False
 
+def parallel_task_runner(function_name,input_list,timeout=86400):
+    '''
+    Adapted from https://stackoverflow.com/questions/66051638/set-a-time-limit-on-the-pool-map-operation-when-using-multiprocessing
+    This function will always use the same number of processes equal to the length of the list. Please see
+    https://stackoverflow.com/questions/29494001/how-can-i-abort-a-task-in-a-multiprocessing-pool-after-a-timeout for implementing
+    something when number of available threads is smaller than the length of the input_list. I have not taken a detailed look at this
+    function, and putting this here for future reference if needed. Also note that there was some discussion about the second link, 
+    in the discussion of the first link.
+    '''
+    pool = multiprocessing.pool.Pool(processes=len(input_list))
+    results=[pool.apply_async(function_name,args=(item1,)) for item1 in input_list]
+    starttime=timeit.default_timer()
+    successful_results=[]
+    time_to_wait=timeout
+    for i,result in enumerate(results):
+        try:
+            return_value = result.get(time_to_wait)
+        except multiprocessing.TimeoutError:
+            pass
+        else:
+            successful_results.append(return_value)
+        diff=timeit.default_timer()-starttime
+        time_to_wait=timeout-diff
+        if time_to_wait<0:
+            time_to_wait=0
+    pool.terminate()
+    pool.close()
+    pool.join()
+    
+    return successful_results
+        
+            
 
 def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_fit_size=2, briggs=-0.5):
     msfiles_slfcaled_success = []
@@ -1226,26 +1250,19 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     tref_mjd = (btime.mjd + etime.mjd) / 2. 
     tref = Time(tref_mjd, format='mjd')
     ephem = hf.read_horizons(tref, dur=1./60./24., observatory='OVRO_MMA')
-    pool = multiprocessing.pool.Pool(processes=len(msfiles_slfcaled_success))
+
     run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, \
                 nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
-    results = pool.map_async(run_imager_partial, msfiles_slfcaled_success)
+
     timeout = 300.
-    results.wait(timeout=timeout)
-    if results.ready():
-        fitsfiles = results.get()
+    
+    fitsfiles=parallel_task_runner(run_imager_partial,msfiles_slfcaled_success,timeout=timeout)
+    if len(fitsfiles)==len(msfiles_slfcaled_success):
         time_img2 = timeit.default_timer()
         logging.debug('Imaging for all {0:d} bands is done in {1:.1f} s'.format(len(msfiles_slfcaled_success), time_img2-time_img1))
     else:
         logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
         logging.debug('Proceed anyway')
-        pool.terminate()
-        fitsfiles = []
-        #fitsfiles = results.get()
-            
-    pool.close()
-    pool.join()
-
     return fitsfiles
 
 def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined, \
