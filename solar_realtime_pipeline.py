@@ -983,8 +983,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
                 pool.terminate()
-                msfiles_slfcaled = result.get()
-                #msfiles_slfcaled = [] 
+                #msfiles_slfcaled = result.get()
+                msfiles_slfcaled = [] 
 
             pool.close()
             pool.join()
@@ -1240,8 +1240,8 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
         logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
         logging.debug('Proceed anyway')
         pool.terminate()
-        #fitsfiles = []
-        fitsfiles = results.get()
+        fitsfiles = []
+        #fitsfiles = results.get()
             
     pool.close()
     pool.join()
