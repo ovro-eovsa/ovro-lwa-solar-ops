@@ -17,10 +17,10 @@ def get_filecopy_pid(mypid):
     return -1
 
 
-def copy_files(timestr, server='calim1', remote_dir='/lustre/bin.chen/realtime_pipeline/',
+def copy_files(timestr, server='lwacalim01', remote_dir='/lustre/solarpipe/realtime_pipeline/',
         local_dir='/nas6/ovro-lwa-data/', file_type='fits', file_ext='fits', file_level='slow/lev1/', ndays=1):
     """
-    Purpose: rsync files from default directory of calim07:/lustre/bin.chen/realtime_pipeline/fits/*
+    Purpose: rsync files from default directory of calim07:/lustre/solarpipe/realtime_pipeline/fits/*
         to pipeline:/nas6/ovro-lwa-data/fits/* and organize them according to date.
     timestr: input time '2024-01-02T18:00:00'
     """
@@ -78,7 +78,7 @@ def copy_files(timestr, server='calim1', remote_dir='/lustre/bin.chen/realtime_p
                 if len(files) > 0:
                     os.system('cp ' + files[-1] + ' ' + local_dir + '/../latest_spectrum.png')
 
-def copy_1min_plots(timestr, server='calim1', remote_img_folder='/lustre/bin.chen/realtime_pipeline/', 
+def copy_1min_plots(timestr, server='lwacalim01', remote_img_folder='/lustre/solarpipe/realtime_pipeline/', 
         remote_beam_folder='/opt/devel/dgary/figs_beam/', 
         local_root_folder='/common/webplots/lwa-data/',
         local_img_folder='/common/webplots/lwa-data/qlook_images/',
@@ -111,7 +111,7 @@ def copy_1min_plots(timestr, server='calim1', remote_img_folder='/lustre/bin.che
             file_type='allsky', file_ext='png', file_level='figs')
 
 
-def copy_hdf_data(timestr, server='calim1', remote_data_folder='/lustre/bin.chen/realtime_pipeline/', 
+def copy_hdf_data(timestr, server='lwacalim01', remote_data_folder='/lustre/solarpipe/realtime_pipeline/', 
         local_root_folder='/nas6/ovro-lwa-data/', ndays=2):
     ''' Automatically copy FITS and HDF data to local server
     '''
@@ -139,7 +139,7 @@ def copy_hdf_data(timestr, server='calim1', remote_data_folder='/lustre/bin.chen
             file_type='hdf', file_ext='hdf', file_level='fast/lev15/')
 
 
-def copy_beam_data(timestr, server='calim1', remote_data_folder='/lustre/pipeline/beam02/',
+def copy_beam_data(timestr, server='lwacalim01', remote_data_folder='/lustre/pipeline/beam02/',
         local_data_folder='/nas5/ovro-lwa-data/beam/beam-data/', ndays=2):
     """
     Automatically copy beamforming data to local server
@@ -257,13 +257,14 @@ if __name__ == "__main__":
     parser.add_argument('--plots', default=False, help='If set, copy and organize quicklook spectrogram and image plots', action='store_true')
     parser.add_argument('--beam', default=False, help='If set, copy and organize beam data', action='store_true')
     parser.add_argument('--hdf', default=False, help='If set, copy and organize image fits and hdf data', action='store_true')
+    parser.add_argument('--ndays', default=2, help='Number of days prior to given time to transfer data')
     timestr = Time.now().iso
-    # ndays is the number of days to go back in time for checking the existence of data
     args = parser.parse_args()
+    ndays = int(args.ndays)
     if args.plots:
-        copy_1min_plots(timestr, ndays=2)
+        copy_1min_plots(timestr, ndays=ndays)
     if args.beam:
-        copy_beam_data(timestr, ndays=2)
+        copy_beam_data(timestr, ndays=ndays)
     if args.hdf:
-        copy_hdf_data(timestr, ndays=2)
+        copy_hdf_data(timestr, ndays=ndays)
     exit()

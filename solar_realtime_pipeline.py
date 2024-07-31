@@ -190,7 +190,6 @@ def list_msfiles(intime, lustre=True, file_path='slow', server=None, time_interv
                         msfiles.append({'path': filestr, 'name': filename, 'time': timestr, 'freq': freqstr})
             else:
                 logging.info('Did not find any files at the given time {0:s}.'.format(intime.isot)) 
-                msfiles=[]
     else:
         if server:
             cmd = 'ssh ' + server + ' ls ' + file_path + ' | grep ' + tstr
@@ -224,7 +223,7 @@ def download_msfiles_cmd(msfile_path, server, destination):
     if std_err:
         print(std_err)
 
-def download_msfiles(msfiles, destination='/fast/bin.chen/realtime_pipeline/slow_working/', bands=None, verbose=True, server=None, maxthread=6):
+def download_msfiles(msfiles, destination='/fast/solarpipe/realtime_pipeline/slow_working/', bands=None, verbose=True, server=None, maxthread=6):
     from multiprocessing.pool import ThreadPool
     """
     Parallelized downloading for msfiles returned from list_msfiles() to a destination.
@@ -267,7 +266,7 @@ def download_msfiles(msfiles, destination='/fast/bin.chen/realtime_pipeline/slow
     return omsfiles
 
 
-def download_timerange(starttime, endtime, download_interval='1min', destination='/fast/bin.chen/20231027/slow/', 
+def download_timerange(starttime, endtime, download_interval='1min', destination='/fast/solarpipe/20231027/slow/', 
                 server=None, lustre=True, file_path='slow', bands=None, verbose=True, maxthread=5):
     '''
     :param download_interval: If str should either be 10s, 1min or 10min. If integer should be in seconds.
@@ -312,7 +311,7 @@ def download_timerange(starttime, endtime, download_interval='1min', destination
         print('====Downloading all {0:d} times took {1:.1f} s===='.format(nt, time_completed-time_bg))
 
 
-def download_calibms(calib_time, download_fold = '/lustre/bin.chen/realtime_pipeline/ms_calib/', doflag=True,
+def download_calibms(calib_time, download_fold = '/lustre/solarpipe/realtime_pipeline/ms_calib/', doflag=True,
         bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
     """
     Function to download calibration ms files for all or selected bands based on a given time
@@ -480,6 +479,12 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
                 num_apcal=1, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
                 flagdir=None, delete_allsky=False):
     
+    try:
+        msmd.open(msfile)
+    except Exception as e:
+        logging.error(e)
+        return -1
+
     # do time average if the input ms file is fast visibility
     if check_fast_ms(msfile):
         omsfile = os.path.dirname(msfile) + '/' + os.path.basename(msfile).replace('.ms', '.10s.ms')
@@ -609,7 +614,7 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         return -1
 
 
-def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/', overwrite=True, overbright=2e6,
+def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/', overwrite=True, overbright=2e6,
         dointerp=False, interp_method='linear', max_dt=600., slowfast='slow'):
     """
     Function for doing daily refraction corrections based on level 1 fits files produced in a given solar day
@@ -756,9 +761,9 @@ def daily_refra_correction(date, save_dir='/lustre/bin.chen/realtime_pipeline/',
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 
             min_nband=6, nch_out=12, beam_fit_size=2, briggs=-0.5, stokes='I', do_selfcal=True, num_phase_cal=0, num_apcal=1, 
             overwrite_ms=False, delete_ms_slfcaled=False, logger_file=None, compress_fits=True,
-            proc_dir = '/fast/bin.chen/realtime_pipeline/',
-            save_dir = '/lustre/bin.chen/realtime_pipeline/',
-            calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
+            proc_dir = '/fast/solarpipe/realtime_pipeline/',
+            save_dir = '/lustre/solarpipe/realtime_pipeline/',
+            calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables/',
             calib_file = '20240117_145752',
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
@@ -966,9 +971,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky)
             result = pool.map_async(run_calib_partial, msfiles)
             if slowfast.lower()=='slow':
-                timeout = 800.
+                timeout = 1200.
             else:
-                timeout = 200.
+                timeout = 300.
             result.wait(timeout=timeout)
             if result.ready():
                 msfiles_slfcaled = result.get()
@@ -978,7 +983,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
                 pool.terminate()
-                msfiles_slfcaled = [] 
+                msfiles_slfcaled = result.get()
+                #msfiles_slfcaled = [] 
 
             pool.close()
             pool.join()
@@ -1115,69 +1121,72 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 pass
         
         if 'fitsfiles' in locals():
-            if len(fitsfiles[0]) > 1:
-                datedir = btime.isot[:10].replace('-','/')+'/'
-                
-                # Note the following reorganization is only for synoptic plots and refraction csv files
-                # if UT time is before 4 UT, assign it to the earlier date. 
-                date_mjd = int(btime.mjd)
-                if btime.mjd - date_mjd < 4./24.:
-                    datestr_synop = Time(btime.mjd - 1., format='mjd').isot[:10].replace('-','')
-                    datedir_synop = Time(btime.mjd - 1., format='mjd').isot[:10].replace('-','/') + '/'
-                else:
-                    datestr_synop = Time(btime.mjd, format='mjd').isot[:10].replace('-','')
-                    datedir_synop = Time(btime.mjd, format='mjd').isot[:10].replace('-','/') + '/'
+            if len(fitsfiles) > 0:
+                if len(fitsfiles[0]) > 1:
+                    datedir = btime.isot[:10].replace('-','/')+'/'
                     
-                fig_mfs_dir_sub_synop = fig_mfs_dir + '/synop/' + datedir_synop
-                
-                if not os.path.exists(fig_mfs_dir_sub_synop):
-                    os.makedirs(fig_mfs_dir_sub_synop)
-                
-                 
-                fits_images, plotted_image = compress_plot_images(fitsfiles, btime, datedir, imagedir_allch_combined, hdf_dir, \
-                                        fig_mfs_dir, stokes, fast_vis=fast_vis)
-                
-                logging.info("Level 1 images plotted ok")
-                figname_to_copy=None
-                
-                # Do refraction corrections
-                if not fast_vis:    
-                    if len(fits_images)==2:  #### 0  is mfs, 1 in fine channel
-                        if do_refra:
-                            refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
-                            logging.info("Trying to do refraction correction")
+                    # Note the following reorganization is only for synoptic plots and refraction csv files
+                    # if UT time is before 4 UT, assign it to the earlier date. 
+                    date_mjd = int(btime.mjd)
+                    if btime.mjd - date_mjd < 4./24.:
+                        datestr_synop = Time(btime.mjd - 1., format='mjd').isot[:10].replace('-','')
+                        datedir_synop = Time(btime.mjd - 1., format='mjd').isot[:10].replace('-','/') + '/'
+                    else:
+                        datestr_synop = Time(btime.mjd, format='mjd').isot[:10].replace('-','')
+                        datedir_synop = Time(btime.mjd, format='mjd').isot[:10].replace('-','/') + '/'
+                        
+                    fig_mfs_dir_sub_synop = fig_mfs_dir + '/synop/' + datedir_synop
+                    
+                    if not os.path.exists(fig_mfs_dir_sub_synop):
+                        os.makedirs(fig_mfs_dir_sub_synop)
+                    
+                     
+                    fits_images, plotted_image = compress_plot_images(fitsfiles, btime, datedir, imagedir_allch_combined, hdf_dir, \
+                                            fig_mfs_dir, stokes, fast_vis=fast_vis)
+                    
+                    logging.info("Level 1 images plotted ok")
+                    figname_to_copy=None
+                    
+                    # Do refraction corrections
+                    if not fast_vis:    
+                        if len(fits_images)==2:  #### 0  is mfs, 1 in fine channel
+                            if do_refra:
+                                refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
+                                logging.info("Trying to do refraction correction")
 
-                            refra_image, success=do_refraction_correction(fits_images, overbright, \
-                                                        refrafile, datedir, imagedir_allch_combined, hdf_dir, \
-                                                        fig_mfs_dir,btime)
-                            if not success:
-                                logging.info('Refraction correction failed for '+ btime.isot)
-                                figname_to_copy=plotted_image
-                                figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs', '.synop_mfs')    
-                            else:
-                                figname_to_copy=refra_image
-                                figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs', '.synop_mfs')
-                      
-                    if not figname_to_copy:
+                                refra_image, success=do_refraction_correction(fits_images, overbright, \
+                                                            refrafile, datedir, imagedir_allch_combined, hdf_dir, \
+                                                            fig_mfs_dir,btime)
+                                if not success:
+                                    logging.info('Refraction correction failed for '+ btime.isot)
+                                    figname_to_copy=plotted_image
+                                    figname_synop = os.path.basename(plotted_image).replace('.lev1_mfs', '.synop_mfs')    
+                                else:
+                                    figname_to_copy=refra_image
+                                    figname_synop = os.path.basename(refra_image).replace('.lev1.5_mfs', '.synop_mfs')
+                          
+                        if not figname_to_copy:
+                            figname_to_copy = plotted_image
+                            figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
+                    else:
                         figname_to_copy = plotted_image
                         figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
-                else:
-                    figname_to_copy = plotted_image
-                    figname_synop = os.path.basename(plotted_image).replace('.lev1', '.synop')             
 
-                synoptic_image=os.path.join(fig_mfs_dir_sub_synop, figname_synop)    
-                os.system('cp '+ figname_to_copy + ' ' + synoptic_image)   
-                
-                if delete_working_fits:
-                    os.system('rm -rf '+imagedir_allch + '*')
-                time_completed= timeit.default_timer() 
-                logging.debug('====All processing for time {0:s} is done in {1:.1f} minutes'.format(timestr, (time_completed-time_begin)/60.))
-                return True
+                    synoptic_image=os.path.join(fig_mfs_dir_sub_synop, figname_synop)    
+                    os.system('cp '+ figname_to_copy + ' ' + synoptic_image)   
+                    
+                    if delete_working_fits:
+                        os.system('rm -rf '+imagedir_allch + '*')
+                    time_completed= timeit.default_timer() 
+                    logging.debug('====All processing for time {0:s} is done in {1:.1f} minutes'.format(timestr, (time_completed-time_begin)/60.))
+                    return True
+                else:
+                    if delete_working_fits:
+                        os.system('rm -rf '+imagedir_allch + '*')
+                    time_exit = timeit.default_timer()
+                    logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(timestr, (time_exit-time_begin)/60.))
+                    return False
             else:
-                if delete_working_fits:
-                    os.system('rm -rf '+imagedir_allch + '*')
-                time_exit = timeit.default_timer()
-                logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(timestr, (time_exit-time_begin)/60.))
                 return False
         elif do_imaging:
             if delete_working_fits:
@@ -1221,7 +1230,7 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, \
                 nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
     results = pool.map_async(run_imager_partial, msfiles_slfcaled_success)
-    timeout = 200.
+    timeout = 300.
     results.wait(timeout=timeout)
     if results.ready():
         fitsfiles = results.get()
@@ -1231,7 +1240,8 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
         logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
         logging.debug('Proceed anyway')
         pool.terminate()
-        fitsfiles = []
+        #fitsfiles = []
+        fitsfiles = results.get()
             
     pool.close()
     pool.join()
@@ -1373,10 +1383,10 @@ def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir
 
 def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay_from_now=180., do_selfcal=True, num_phase_cal=0, num_apcal=1, 
         server=None, lustre=True, file_path='slow', multinode=True, nodes='0123456789', delete_ms_slfcaled=True, slowfast='slow', 
-        logger_dir = '/lustre/bin.chen/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
-        proc_dir = '/fast/bin.chen/realtime_pipeline/',
-        save_dir = '/lustre/bin.chen/realtime_pipeline/',
-        calib_dir = '/lustre/bin.chen/realtime_pipeline/caltables/',
+        logger_dir = '/lustre/solarpipe/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
+        proc_dir = '/fast/solarpipe/realtime_pipeline/',
+        save_dir = '/lustre/solarpipe/realtime_pipeline/',
+        calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables/',
         calib_file = '20240117_145752', altitude_limit=15., 
         beam_fit_size = 2,
         briggs=-0.5,
@@ -1542,10 +1552,10 @@ if __name__=='__main__':
         Slow pipeline: pdsh -w lwacalim[00-09] 'conda activate suncasa && python /opt/devel/bin.chen/software/ovro-lwa-solar-ops/solar_realtime_pipeline.py 2024-05-15T14:10 --briggs -1.0 --slowfast slow --keep_allsky'
         Fast pipeline: pdsh -w lwacalim[00-09] 'conda activate suncasa && python /opt/devel/bin.chen/software/ovro-lwa-solar-ops/solar_realtime_pipeline.py 2024-05-15T14:10 --briggs -0.5 --slowfast fast --interval 100'
     Sometimes afer killing the pipeline (with ctrl c), one need to remove the temporary files and kill all the processes before restarting.
-        pdsh -w lwacalim[00-09] 'rm -rf /fast/bin.chen/realtime_pipeline/slow_working/*'
-        pdsh -w lwacalim[00-09] 'rm -rf /fast/bin.chen/realtime_pipeline/slow_slfcaled/*'
-        pdsh -w lwacalim[00-09] 'pkill -u bin.chen -f wsclean'
-        pdsh -w lwacalim[00-09] 'pkill -u bin.chen -f python'
+        pdsh -w lwacalim[00-09] 'rm -rf /fast/solarpipe/realtime_pipeline/slow_working/*'
+        pdsh -w lwacalim[00-09] 'rm -rf /fast/solarpipe/realtime_pipeline/slow_slfcaled/*'
+        pdsh -w lwacalim[00-09] 'pkill -u solarpipe -f wsclean'
+        pdsh -w lwacalim[00-09] 'pkill -u solarpipe -f python'
     """
     parser = argparse.ArgumentParser(description='Solar realtime pipeline')
     parser.add_argument('--start_time', default=Time.now().isot, type=str, help='Timestamp for the start time. Format YYYY-MM-DDTHH:MM')
@@ -1596,7 +1606,7 @@ if __name__=='__main__':
         calib_file = args.calib_file
     else:
         logging.info('Calibration tables not provided or recognized. Attempting to find those from default location on lwacalim.')
-        calib_tables = glob.glob('/lustre/bin.chen/realtime_pipeline/caltables_latest/*.bcal')
+        calib_tables = glob.glob('/lustre/solarpipe/realtime_pipeline/caltables_latest/*.bcal')
         if len(calib_tables) > 10:
             calib_file = os.path.basename(calib_tables[0])[:15]
             logging.info('Using calibration file {0:s}'.format(calib_file))
