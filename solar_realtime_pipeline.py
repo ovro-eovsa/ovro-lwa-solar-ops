@@ -97,55 +97,6 @@ def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
     return t0, t1
 
 
-#### define data files #####
-def list_msfiles_old(intime, server='lwacalim', distributed=True, file_path='slow',
-            nodes = [1, 2, 3, 4, 5, 6, 7, 8], time_interval='10s'):
-    """
-    Return a list of visibilities to be copied for pipeline processing for a given time
-    :param intime: astropy Time object
-    :param time_interval: Options are '10s', '1min', '10min', '1hr', '1day'
-    :param nband_min: minimum number of available subbands acceptable
-    """
-    intimestr = intime.isot[:-4].replace('-','').replace(':','').replace('T','_')
-    if time_interval == '10s':
-        tstr = intimestr[:-1]
-    if time_interval == '1min':
-        tstr = intimestr[:-2]
-    if time_interval == '10min':
-        tstr = intimestr[:-3]
-    if time_interval == '1hr':
-        tstr = intimestr[:-4]
-    if time_interval == '1day':
-        tstr = intimestr[:9]
-
-    msfiles = []
-    if not distributed:
-        args = ['ssh', '{}'.format(server), 'ls', '{}'.format(file_path), '|', 'grep', '{}'.format(tstr)]
-        p = subprocess.run(args, capture_output=True)
-        filenames = p.stdout.decode('utf-8').split('\n')[:-1]
-        for filename in filenames:
-            if filename[-6:] == 'MHz.ms':
-                pathstr = '{0:s}:{1:s}/{2:s}'.format(server, file_path, filename)
-                tmpstr = filename[:15].replace('_', 'T')
-                timestr = tmpstr[:4] + '-' + tmpstr[4:6] + '-' + tmpstr[6:11] + ':' + tmpstr[11:13] + ':' + tmpstr[13:]
-                freqstr = filename[16:21]
-                msfiles.append({'path': pathstr, 'name': filename, 'time': timestr, 'freq': freqstr})
-    else:
-        processes=[]
-        for i in nodes:
-            args = ['ssh', '{0:s}0{1:d}'.format(server, i), 'ls', '/data0{0:d}/{1:s}'.format(i, file_path), '|', 'grep', '{}'.format(tstr)]
-            p = subprocess.Popen(args, stdout=subprocess.PIPE)
-            processes.append(p)
-            filenames = p.communicate()[0].decode('utf-8').split('\n')[:-1]
-            for filename in filenames:
-                if filename[-6:] == 'MHz.ms':
-                    pathstr = '{0:s}0{1:d}:/data0{2:d}/{3:s}/{4:s}'.format(server, i, i, file_path, filename)
-                    tmpstr = filename[:15].replace('_', 'T')
-                    timestr = tmpstr[:4] + '-' + tmpstr[4:6] + '-' + tmpstr[6:11] + ':' + tmpstr[11:13] + ':' + tmpstr[13:]
-                    freqstr = filename[16:21]
-                    msfiles.append({'path': pathstr, 'name': filename, 'time': timestr, 'freq': freqstr})
-    return msfiles
-
 def list_msfiles(intime, lustre=True, file_path='slow', server=None, time_interval='10s', 
                  bands=['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
     """
