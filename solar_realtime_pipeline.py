@@ -1352,7 +1352,7 @@ def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir
         
 
 def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay_from_now=180., do_selfcal=True, num_phase_cal=0, num_apcal=1, 
-        server=None, lustre=True, file_path='slow', multinode=True, nodes='0123456789', delete_ms_slfcaled=True, slowfast='slow', 
+        server=None, lustre=True, file_path='slow', multinode=True, slurmmanaged=True, taskids='0123456789', delete_ms_slfcaled=True, slowfast='slow', 
         logger_dir = '/lustre/solarpipe/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
         proc_dir = '/fast/solarpipe/realtime_pipeline/',
         save_dir = '/lustre/solarpipe/realtime_pipeline/',
@@ -1395,7 +1395,13 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     except Exception as e:
         logging.error(e)
         raise e
-    
+
+    if slurmmanaged:       
+        task_id = int(os.environ.get('SLURM_PROCID', 0))
+        task_count = int(os.environ.get('SLURM_NTASKS', 1))
+        current_task_id = task_id    
+    else:
+        current_task_id = int(socket.gethostname()[-2:])
         
     (t_rise, t_set) = sun_riseset(time_start, altitude_limit=altitude_limit)
     # set up logging file
@@ -1416,9 +1422,18 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
 
     logging.info('{0:s}: I am asked to start imaging for {1:s}'.format(socket.gethostname(), time_start.isot))
     if multinode:
-        nodenum = int(socket.gethostname()[-2:])
-        nodes_list=[int(n) for n in list(nodes)]
-        nnode = len(nodes_list)
+        if slurmmanaged:
+            # attribute the task_id as node number 
+            nodenum = task_id
+            nnode = task_count
+            nodes_list=[int(n) for n in list(taskids)]
+
+        else:
+            # pdsh way, using hostname to manage
+            nodenum = int(socket.gethostname()[-2:])
+            nodes_list=[int(n) for n in list(taskids)]
+            nnode = len(nodes_list)
+
         delay_by_node = nodes_list.index(nodenum) * (time_interval/nnode) 
     else:
         logging.info('{0:s}: I am running on a single node'.format(socket.gethostname()))
@@ -1479,7 +1494,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             else:
                 date_synop = Time(time_start.mjd, format='mjd').isot[:10]
             
-            if int(socket.gethostname()[-2:]) == nodes_list[-1] and slowfast.lower()=='slow':
+            # use last "worker" for daily refraction correction
+            if current_task_id == nodes_list[-1] and slowfast.lower()=='slow':
                 logging.info('{0:s}: Sun is setting. Done for the day. Doing refraction corrections for the full day.'.format(socket.gethostname())) 
                 daily_refra_correction(date_synop, save_dir=save_dir, overwrite=False, dointerp=True, interp_method='linear', max_dt=600.)
                 twait = t_rise_next - Time.now() 
@@ -1513,7 +1529,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                     datefmt='%Y-%m-%d %H:%M:%S', force=True)
 
                 if twait.sec > 0:
-                    sleep(twait.sec + 60. + delay_by_node)
+                    sleep(twait.sec + 60. + delay_by_node) 
 
 
 if __name__=='__main__':
@@ -1531,7 +1547,7 @@ if __name__=='__main__':
     parser.add_argument('--start_time', default=Time.now().isot, type=str, help='Timestamp for the start time. Format YYYY-MM-DDTHH:MM')
     parser.add_argument('--end_time', default='2030-01-01T00:00', help='End time in format YYYY-MM-DDTHH:MM')
     parser.add_argument('--interval', default=600., help='Time interval in seconds')
-    parser.add_argument('--nodes', default='0123456789', help='List of nodes to use')
+    parser.add_argument('--taskids', default='0123456789', help='List of taskids to use')
     parser.add_argument('--delay', default=60, help='Delay from current time in seconds')
     parser.add_argument('--server', default=None, help='Name of the server where the raw data is located. Must be defined in ~/.ssh/config.')
     parser.add_argument('--nolustre', default=False, help='If set, do NOT assume that the data are stored under /lustre/pipeline/ in the default tree', action='store_true')
@@ -1585,7 +1601,7 @@ if __name__=='__main__':
             sys.exit(0)
 
     try:
-        run_pipeline(time_start=args.start_time, time_end=Time(args.end_time), time_interval=float(args.interval), nodes=args.nodes, delay_from_now=float(args.delay),
+        run_pipeline(time_start=args.start_time, time_end=Time(args.end_time), time_interval=float(args.interval), taskids=args.taskids, delay_from_now=float(args.delay),
                      server=args.server, lustre=(not args.nolustre), file_path=args.file_path,
                      proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
                      altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
