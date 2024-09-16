@@ -7,16 +7,12 @@ def main():
     task_id = int(os.environ.get('SLURM_PROCID', 0))
     task_count = int(os.environ.get('SLURM_NTASKS', 1))
     hostname = socket.gethostname()
-    print(f"SLURM_PROCID: {task_id}, SLURM_NTASKS: {task_count}, Hostname: {hostname}")
     
+    print(time.ctime(),f"SLURM_PROCID: {task_id}, SLURM_NTASKS: {task_count}, Hostname: {hostname}")
+    # should print correct task_id and task_count and hostname
+
     # Sleep for 3 seconds
     time.sleep(3)
-
-    # Add your task-specific code here
-    # For example:
-    # process_data(task_id, task_count)
-
-# ToDo: taskid with smaller number should run first frames
 
 if __name__ == "__main__":
     main()
