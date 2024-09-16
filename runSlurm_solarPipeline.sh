@@ -13,7 +13,7 @@
 
 DIRSOFT=/lustre/peijin/ovro-lwa-solar-ops/
 DIRRUN=/lustre/peijin/testslurm/
-DIR_PY_ENV=/opt/devel/peijin/solarenv    
+DIR_PY_ENV=/opt/devel/peijin/solarenv/
 source /home/peijinz/.bashrc
 conda activate $DIR_PY_ENV
 
