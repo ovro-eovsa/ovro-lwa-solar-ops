@@ -6,15 +6,15 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=32G
 #SBATCH --time=336:00:00
-#SBATCH --output=/home/solarpipe/log/%j.out
-#SBATCH --error=/home/solarpipe/log/%j.err
+#SBATCH --output=/lustre/solarpipe/slurmlog/%j.out
+#SBATCH --error=/lustre/solarpipe/slurmlog/%j.err
 #SBATCH --mail-user=pz47@njit.edu
 
 
 DIRSOFT=/lustre/peijin/ovro-lwa-solar-ops/
 DIRRUN=/lustre/peijin/testslurm/
-DIR_PY_ENV=/opt/devel/peijin/solarenv/
-source /home/peijinz/.bashrc
+DIR_PY_ENV=/opt/devel/bin.chen/envs/suncasa/
+source /home/solarpipe/.bashrc
 conda activate $DIR_PY_ENV
 
 
@@ -23,16 +23,20 @@ case "$1" in
     testnodes)
         srun $DIR_PY_ENV/bin/python slurm_taskid_test.py
         ;;
-    slowtest)
+    testslowfixedtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
             --briggs -1.0 --slowfast slow --interval 600 --delay 180 --save_allsky \
             --start_time 2024-09-15T20:00:00 --end_time 2024-09-15T20:30:00 \
             --save_dir /lustre/solarpipe/test_realtime/
         ;;
+    slow)
+        srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
+        --briggs -1.0 --slowfast slow --interval 600 --delay 180 --save_allsky 
+    ;;
     fast)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
             --briggs 1.0 --slowfast fast --interval 100 --delay 180
-        ;;
+    ;;
     testnorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
             --briggs 1.0 --slowfast slow --interval 300 --delay 180 \
