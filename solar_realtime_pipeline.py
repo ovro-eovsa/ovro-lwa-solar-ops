@@ -40,6 +40,9 @@ import platform
 from ovrolwasolar import visualization as ovis
 from ovrolwasolar import refraction_correction as orefr
 
+#import gc # garbage collection
+#gc.enable()
+
 matplotlib.use('agg')
 
 msmd = msmetadata()
@@ -172,7 +175,7 @@ def download_msfiles_cmd(msfile_path, server, destination):
         p = subprocess.Popen(shlex.split('cp -r {0:s} {1:s}'.format(msfile_path, destination)))
     std_out, std_err = p.communicate()
     if std_err:
-        print(std_err)
+        print('<<',Time.now().isot,'>>',std_err)
 
 def download_msfiles(msfiles, destination='/fast/solarpipe/realtime_pipeline/slow_working/', bands=None, verbose=True, server=None, maxthread=6):
     from multiprocessing.pool import ThreadPool
@@ -197,11 +200,11 @@ def download_msfiles(msfiles, destination='/fast/solarpipe/realtime_pipeline/slo
 
     nfile = len(omsfiles_path)
     if nfile == 0:
-        print('No files to download. Abort...')
+        print('<<',Time.now().isot,'>>','No files to download. Abort...')
         return -1
     time_bg = timeit.default_timer() 
     if verbose:
-        print('I am going to download {0:d} files'.format(nfile))
+        print('<<',Time.now().isot,'>>','I am going to download {0:d} files'.format(nfile))
 
     tp = ThreadPool(maxthread)
     for omsfile_path in omsfiles_path:
@@ -212,7 +215,7 @@ def download_msfiles(msfiles, destination='/fast/solarpipe/realtime_pipeline/slo
 
     time_completed = timeit.default_timer() 
     if verbose:
-        print('Downloading {0:d} files took in {1:.1f} s'.format(nfile, time_completed-time_bg))
+        print('<<',Time.now().isot,'>>','Downloading {0:d} files took in {1:.1f} s'.format(nfile, time_completed-time_bg))
     omsfiles = [destination + n for n in omsfiles_name]
     return omsfiles
 
@@ -225,8 +228,8 @@ def download_timerange(starttime, endtime, download_interval='1min', destination
     time_bg = timeit.default_timer() 
     t_start = Time(starttime)
     t_end = Time(endtime)
-    print('Start time: ', t_start.isot)
-    print('End time: ', t_end.isot)
+    print('<<',Time.now().isot,'>>','Start time: ', t_start.isot)
+    print('<<',Time.now().isot,'>>','End time: ', t_end.isot)
     if not os.path.exists(destination):
         os.makedirs(destination)
 
@@ -320,11 +323,11 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
         try:
             calib_time = Time(calib_in)
         except:
-            print('The input time needs to be astropy.time.Time format. Abort...')
+            print('<<',Time.now().isot,'>>','The input time needs to be astropy.time.Time format. Abort...')
             return -1
         ms_calib = download_calibms(calib_time, doflag=True, download_fold=download_fold)
     else:
-        print('Input not recognized. Abort...')
+        print('<<',Time.now().isot,'>>','Input not recognized. Abort...')
         return -1
 
     if len(ms_calib) > 0:
@@ -346,11 +349,11 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
                 msmd.done()
                 bcaltbs.append(bcaltb)
             except Exception as e:
-                print('Something is wrong when making calibrations for ', ms_calib_)
+                print('<<',Time.now().isot,'>>','Something is wrong when making calibrations for ', ms_calib_)
                 print(e)
         chan_freqs = np.concatenate(chan_freqs)
     else:
-        print('The list of calibration ms files seems to be empty. Abort...')
+        print('<<',Time.now().isot,'>>','The list of calibration ms files seems to be empty. Abort...')
         return -1
         
 
@@ -460,7 +463,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         gaintables = get_selfcal_table_to_apply(msfile,caltable_folder)
     if len(bcal_tables_) > 0:
         bcal_table = [bcal_tables_[0]]
-        print('Found calibration table {0:s}'.format(bcal_table[0]))
+        print('<<',Time.now().isot,'>>','Found calibration table {0:s}'.format(bcal_table[0]))
         if not do_selfcal:
             for cal in gaintables:
                 bcal_table.append(cal)
@@ -508,7 +511,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
             logging.error(e)
             return -1
     else:
-        print('No night time ms or caltable available for {0:s}. Skip...'.format(msfile))
+        print('<<',Time.now().isot,'>>','No night time ms or caltable available for {0:s}. Skip...'.format(msfile))
         return -1
 
 
@@ -540,7 +543,7 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         sclfactor = 1. / jones_matrices[0][0]
         helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun') 
-        default_wscleancmd = "wsclean -j 1 -mem 2 -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs " + str(briggs) + " -minuv-l 10 -auto-threshold 3 -name " + helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes
+        default_wscleancmd = "wsclean -j 1 -mem 2 -quiet -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs " + str(briggs) + " -minuv-l 10 -auto-threshold 3 -name " + helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes
 
         if nch_out>1:
             # default to be used for slow visibility imaging for fine channel imaging
@@ -580,11 +583,11 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
         try:
             date0 = Time(date)
         except:
-            print("Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
+            print('<<',Time.now().isot,'>>',"Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
     elif isinstance(date, Time):
         date0 = date
     else:
-        print("Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
+        print('<<',Time.now().isot,'>>',"Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
 
     # define output directories
     fits_dir = save_dir + '/fits/' + slowfast + '/'
@@ -628,11 +631,11 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
     if os.path.exists(refrafile):
         df = pd.read_csv(refrafile)
     else:
-        print('Cannot find a refraction correction file in the designated directory. Make a new one from data.')  
+        print('<<',Time.now().isot,'>>','Cannot find a refraction correction file in the designated directory. Make a new one from data.')  
 
     for fits_fch_lv10 in fits_fch_lv10_all:
         fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
-        print('processing fits '+fits_fch_lv10)
+        print('<<',Time.now().isot,'>>','processing fits '+fits_fch_lv10)
         datestr = os.path.basename(fits_fch_lv10).split('.')[2].split('T')[0]
         timestr = os.path.basename(fits_fch_lv10).split('.')[2].split('T')[1][:-1]
         datetimestr = datestr + 'T' + timestr[:2] + ':' + timestr[2:4] + ':' + timestr[4:]
@@ -649,7 +652,7 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
         try:
             meta, data = ndfits.read(fits_fch_lv10)
             if 'df' in locals() and meta['header']['date-obs'][:19] in df.Time.values and not overwrite and slowfast == 'slow':
-                print('Refraction correction record for '+ meta['header']['date-obs'] + ' already exists. Continue')
+                print('<<',Time.now().isot,'>>','Refraction correction record for '+ meta['header']['date-obs'] + ' already exists. Continue')
                 continue
             else:
                 refra_rec = orefr.refraction_fit_param(fits_fch_lv10, return_record=True, overbright=overbright)
@@ -664,16 +667,16 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
                         if (refra_rec['Time'] in df['Time'].unique()):
                             cols = list(df.columns)
                             df.loc[df.Time.isin(df_new.Time), cols] = df_new[cols].values
-                            print('Refraction correction record for '+ refra_rec['Time'] + ' updated in '+ refrafile)
+                            print('<<',Time.now().isot,'>>','Refraction correction record for '+ refra_rec['Time'] + ' updated in '+ refrafile)
                         else:
                             df = pd.concat([df_new, df], ignore_index=True)
                             df = df.sort_values(by='Time')
                             df.to_csv(refrafile, index=False)
-                            print('Refraction correction record for '+ refra_rec['Time'] + ' added to '+ refrafile)
+                            print('<<',Time.now().isot,'>>','Refraction correction record for '+ refra_rec['Time'] + ' added to '+ refrafile)
                     else:
                         df = df_new
                         df.to_csv(refrafile, index=False)
-                        print('Refraction correction record for '+ refra_rec['Time'] + ' added to '+ refrafile)
+                        print('<<',Time.now().isot,'>>','Refraction correction record for '+ refra_rec['Time'] + ' added to '+ refrafile)
 
                     fits_mfs_lv15 = orefr.apply_refra_record(fits_mfs_lv10, refra_rec, fname_out=fits_mfs_lv15)
                     if fits_mfs_lv15:
@@ -687,12 +690,12 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
                         utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
 
                 else:
-                    print('Refraction correction failed for '+ datetimestr)
+                    print('<<',Time.now().isot,'>>','Refraction correction failed for '+ datetimestr)
                     if dointerp:
-                        print('Trying to interpolate from nearby times')
+                        print('<<',Time.now().isot,'>>','Trying to interpolate from nearby times')
                         fits_mfs_lv15 = orefr.apply_refra_record(fits_mfs_lv10, df, fname_out=fits_mfs_lv15, interp=interp_method, max_dt=max_dt)
                         if fits_mfs_lv15:
-                            print('Succeeded and updating level 1.5 files, but be cautious!')
+                            print('<<',Time.now().isot,'>>','Succeeded and updating level 1.5 files, but be cautious!')
                             utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
                             fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
                             fig.savefig(fig_mfs_dir_lv15 + datedir + figname_lv15)
@@ -701,7 +704,7 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
                             fits_fch_lv15 = orefr.apply_refra_record(fits_fch_lv10, df, fname_out=fits_fch_lv15, interp=interp_method, max_dt=max_dt)
                             utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
                         else:
-                            print('Interpolation failed')
+                            print('<<',Time.now().isot,'>>','Interpolation failed')
                             continue
         except Exception as e:
             logging.error(e)
@@ -830,6 +833,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         os.makedirs(allsky_dir_figs)
 
     try:
+        print('<<',Time.now().isot,'>>')
         print(socket.gethostname(), '=======Processing Time {0:s}======='.format(image_time.isot))
         #logging.info('=======Processing Time {0:s}======='.format(image_time.isot))
         msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s')
@@ -901,7 +905,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             # msfiles0 = msfiles0[2:]
 
             #### copy files over to the working directory ####
-            print('==Copying file over to working directory==')
+            print('<<',Time.now().isot,'>>','==Copying file over to working directory==')
             logging.debug('====Copying file over to working directory====')
             time1 = timeit.default_timer()
             msfiles = download_msfiles(msfiles0, destination=visdir_work, bands=bands)
@@ -1390,6 +1394,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     :param delete_allsky: if True, delete the allsky image after each run. Otherwise keep the latest frame. 
     :param save_allsky: if True, save the allsky image FITS file into save_dir + 'allsky/'
     '''
+
+    print('<<',Time.now().isot,'>>','Starting solar real-time pipeline')
     try:
         time_start = Time(time_start)
     except Exception as e:
@@ -1454,11 +1460,17 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     time_start += TimeDelta(delay_by_node, format='sec')
     logging.info('{0:s}: Delay {1:.1f} min to {2:s}'.format(socket.gethostname(), delay_by_node / 60., time_start.isot))
     sleep(delay_by_node)
+    #loop_count=0
     while True:
+        #loop_count+=1
+        #if loop_count > 6:
+            #gc.collect() # garbage collection every 6 frames
+            #loop_count=0 
+        
         if time_end:
             if time_start > Time(time_end):
                 logging.info('The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
-                print('The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
+                print('<<',Time.now().isot,'>>','The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
                 break
         time1 = timeit.default_timer()
         if time_start > Time.now() - TimeDelta(delay_from_now, format='sec'):
@@ -1520,7 +1532,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 logger_file = logger_dir + datedir + logger_prefix + '_' + slowfast + '_'+ datestr + '_' + server_runtime + '.log'  
 
                 if not os.path.exists(os.path.dirname(logger_file)):
-                    print('Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
+                    print('<<',Time.now().isot,'>>','Path to logger file {0:s} does not exist. Attempting to create the directory tree.'.format(logger_file))
                     os.makedirs(os.path.dirname(logger_file))
 
                 logging.basicConfig(filename=logger_file, filemode='at',
