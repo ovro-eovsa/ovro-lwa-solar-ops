@@ -7,9 +7,10 @@ yesterday_date_str_in_utc = (datetime.datetime.now(datetime.timezone.utc)
 
 def main():
     parser = argparse.ArgumentParser(description='Calculate the daily refraction correction for the LWA')
-    parser.add_argument('date', type=str
-                        , help='Date to calculate the refraction correction for in the format YYYY-MM-DD'
-                        , default=yesterday_date_str_in_utc)
+
+    # data not provided, default to yesterday
+    # not mandatory to provide date
+    parser.add_argument('--date', type=str, default=yesterday_date_str_in_utc, help='Date in UTC format (YYYY-MM-DD)')
 
     args = parser.parse_args()
 
