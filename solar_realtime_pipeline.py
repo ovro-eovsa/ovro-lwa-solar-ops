@@ -1475,10 +1475,12 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 print('<<',Time.now().isot,'>>','The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
                 
                 if slurm_kill_after_sunset:
+                    # sleep for 15min for continuous imaging of all nodes to finish
+                    sleep(900.)
                     # kill all the processes with scancel to jobname "solarpipedaily"
                     os.system('scancel -u solarpipe -n solarpipedaily')
                 break
-            
+
         time1 = timeit.default_timer()
         if time_start > Time.now() - TimeDelta(delay_from_now, format='sec'):
             twait = time_start - Time.now()
