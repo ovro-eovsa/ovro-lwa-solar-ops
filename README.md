@@ -37,3 +37,18 @@ To run slow imaging for given period of time, do:
 sbatch runSlurm_solarPipeline.sh testslowfixedtime \
  "2024-09-15T20:00:00"  "2024-09-15T21:00:00" 
 ```
+
+
+# Alignment to sunrise time
+
+ Use `sunwait` (https://github.com/risacher/sunwait) in `crontab` to submit slurm script.
+
+Need to git clone download source file.
+
+The crontab command for daily schedule.
+
+```bash
+0 10 * * * sunwait wait rise 37.2332N 118.2872W && sbatch /lustre/peijin/ovro-lwa-solar-ops/runSlurm_solarPipeline.sh slow
+```
+
+

@@ -771,7 +771,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             print("slowfast needs to be either 'slow' or 'fast'. Abort") 
             return False
     else:
-        print('I am not working with the default data archive on the lustre server. This is not fully tested. Good luck!')
+        print('<<',Time.now().isot,'>>','I am not working with the default data archive on the lustre server. This is not fully tested. Good luck!')
     
     # caltable_folder is where the initial bandpass calibration tables are located 
     caltable_folder = calib_dir
@@ -989,7 +989,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*.cl')
 
         # Do imaging
-        print('======= processed selfcaled ms files =====')
+        print('<<',Time.now().isot,'>>','======= processed selfcaled ms files =====')
         success = [type(m) is str for m in msfiles_slfcaled]
         msfiles_slfcaled_success = []
         for m in msfiles_slfcaled:
@@ -1361,13 +1361,15 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         proc_dir = '/fast/solarpipe/realtime_pipeline/',
         save_dir = '/lustre/solarpipe/realtime_pipeline/',
         calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables/',
-        calib_file = '20240117_145752', altitude_limit=15., 
+        calib_file = '20240117_145752', altitude_limit=10., 
         beam_fit_size = 2,
         briggs=-0.5,
         delete_working_ms=True, do_refra=True, delete_working_fits=True,
         do_imaging=True, delete_allsky=False, save_allsky=False,
         bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
-        stop_at_sunset=True):
+        stop_at_sunset=True,
+        do_daily_refracorr=True,
+        slurm_kill_after_sunset=False):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -1471,7 +1473,12 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             if time_start > Time(time_end):
                 logging.info('The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
                 print('<<',Time.now().isot,'>>','The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
+                
+                if slurm_kill_after_sunset:
+                    # kill all the processes with scancel to jobname "solarpipedaily"
+                    os.system('scancel -u solarpipe -n solarpipedaily')
                 break
+            
         time1 = timeit.default_timer()
         if time_start > Time.now() - TimeDelta(delay_from_now, format='sec'):
             twait = time_start - Time.now()
@@ -1507,19 +1514,29 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 date_synop = Time(time_start.mjd, format='mjd').isot[:10]
             
             # use last "worker" for daily refraction correction
-            if current_task_id == nodes_list[-1] and slowfast.lower()=='slow':
-                logging.info('{0:s}: Sun is setting. Done for the day. Doing refraction corrections for the full day.'.format(socket.gethostname())) 
-                daily_refra_correction(date_synop, save_dir=save_dir, overwrite=False, dointerp=True, interp_method='linear', max_dt=600.)
-                twait = t_rise_next - Time.now() 
-                logging.info('{0:s}: Refraction corrections done. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
-            else:
-                twait = t_rise_next - Time.now() 
-                logging.info('{0:s}: Sun is setting. Done for the day. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
+            if do_daily_refracorr:
+                if current_task_id == nodes_list[-1] and slowfast.lower()=='slow':
+                    logging.info('{0:s}: Sun is setting. Done for the day. Doing refraction corrections for the full day.'.format(socket.gethostname())) 
+                    daily_refra_correction(date_synop, save_dir=save_dir, overwrite=False, dointerp=True, interp_method='linear', max_dt=600.)
+                    twait = t_rise_next - Time.now() 
+                    logging.info('{0:s}: Refraction corrections done. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
+                else:
+                    twait = t_rise_next - Time.now() 
+                    logging.info('{0:s}: Sun is setting. Done for the day. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
 
             if slowfast.lower() == 'fast':
                 twait += TimeDelta(600., format='sec') 
 
             if stop_at_sunset:
+                if slurm_kill_after_sunset:
+                    # sleep for 15min for continuous imaging of all nodes to finish
+                    sleep(900.)
+                    logging.info('{0:s}: Sun is setting. Done for the day. Exiting.'.format(socket.gethostname()))
+                    print('<<',Time.now().isot,'>>','Sun is setting. Done for the day. Exiting.')
+
+                    # kill all the processes with scancel to jobname "solarpipedaily"
+                    os.system('scancel -u solarpipe -n solarpipedaily')
+
                 break
             else:
                 time_start += TimeDelta(twait.sec + 60. + delay_by_node, format='sec')
@@ -1588,6 +1605,8 @@ if __name__=='__main__':
                     type=str, nargs='*', 
                     default=['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
                     help="Examples: --bands 32MHz 46MHz 64MHz")
+    parser.add_argument('--no_refracorr', default=False, help='If set, do not do daily refraction correction', action='store_true')
+    parser.add_argument('--slurm_kill_after_sunset', default=False, help='If set, kill all the processes with scancel after sunset', action='store_true')
     
     args = parser.parse_args()
     sleep(int(args.sleep_time))
@@ -1619,7 +1638,8 @@ if __name__=='__main__':
                      altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
                      do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
                      delete_working_fits=(not args.keep_working_fits), save_allsky=args.save_allsky, beam_fit_size=args.bmfit_sz, briggs=args.briggs,
-                     do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop))
+                     do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop),
+                     do_daily_refracorr=(not args.no_refracorr), slurm_kill_after_sunset=args.slurm_kill_after_sunset)
     except Exception as e:
         logging.error(e)
         raise e
