@@ -3,7 +3,8 @@
 #SBATCH --partition=general
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=128G
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=64G
 #SBATCH --time=4:00:00
 #SBATCH --output=/lustre/solarpipe/slurmlog/%j.out
 #SBATCH --error=/lustre/solarpipe/slurmlog/%j.err

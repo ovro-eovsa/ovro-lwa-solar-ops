@@ -2,9 +2,10 @@
 #SBATCH --job-name=solarpipedaily
 #SBATCH --partition=general
 #SBATCH --ntasks=10
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=12
-#SBATCH --mem=128G
+#SBATCH --ntasks-per-node=2
+#SBATCH --cpus-per-task=10
+#SBATCH --nodelist=lwacalim[06-10]
+#SBATCH --mem=100G
 #SBATCH --time=16:00:00
 #SBATCH --output=/lustre/solarpipe/slurmlog/%j.out
 #SBATCH --error=/lustre/solarpipe/slurmlog/%j.err
