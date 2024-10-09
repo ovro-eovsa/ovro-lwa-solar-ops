@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=solarpipedaily
-#SBATCH --partition=general
+#SBATCH --partition=solar
 #SBATCH --ntasks=10
 #SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=10
@@ -44,15 +44,15 @@ case "$1" in
         ;;
     testnorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs 1.0 --slowfast slow --interval 300 --delay 180 \
+            --briggs 0.0 --slowfast slow --interval 100 --delay 180 \
             --proc_dir /fast/peijinz/slurmtest/ --save_dir $DIRRUN/save/ \
             --logger_dir $DIRRUN/log/ \
-            --start_time 2024-09-22T13:30:00 --end_time 2024-09-23T00:30:00
+            --start_time 2024-10-07T19:50:00 --end_time 2024-10-07T22:00:00
         ;;
     slownorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs -1.0 --slowfast slow --interval 600 --delay 180  --save_allsky \
-            --start_time 2024-09-22T16:00:00 --end_time 2024-09-23T00:30:00
+            --briggs -0.5 --slowfast slow --interval 100 --delay 180  \
+            --start_time 2024-10-07T19:50:00 --end_time 2024-10-07T22:00:00
         ;;
     fastnorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
