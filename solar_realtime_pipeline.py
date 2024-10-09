@@ -335,7 +335,7 @@ def download_calibms(calib_time, download_fold = '/lustre/solarpipe/realtime_pip
 
 
 def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger=True, 
-        proc_dir='./'):
+        proc_dir='./',doplot=True):
     """
     Function to generate calibration tables for a list of calibration ms files
     :param calib_in: input used for calibration. This can be either a) a string of time stamp recognized by astropy.time.Time 
@@ -398,6 +398,8 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
                 print('Something is wrong when making calibrations for ', ms_calib_)
                 print(e)
         chan_freqs = np.concatenate(chan_freqs)
+        if do_plot:
+            get_waterfall_plot(bcaltbs,ms_calib)
     else:
         print('The list of calibration ms files seems to be empty. Abort...')
         return -1
@@ -430,6 +432,53 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
         return bcaltbs, bcaltbs_bm, bcalfac_file
     else:
         return bcaltbs
+
+
+def get_waterfall_plot(caltables,msnames,savefig=None,num_chan=192,num_ant=352):
+
+    msnames.sort()
+    
+    assert len(caltables)==len(msnames),"The number of MS and caltables do not match. Please check"
+
+    num_msnames=len(msnames)
+    freqs=[]
+    #channels=np.zeros((len(bands)*num_chan,num_ant))
+    data=np.zeros((2,num_msnames*num_chan,num_ant))
+
+    for j,msname in enumerate(msnames):
+        freqs.append(utils.get_freqstr_from_name(msname))
+
+   
+    for j in range(num_msnames):
+
+        try:
+            ind=freqs.index(freqs[j])
+        except ValueError:
+            print ("Freq index not found. Is this a file from OVRO-LWA? Setting gains to 0")
+            data[:,j*num_chan:(j+1)*num_chan,:]=np.nan
+            continue
+        if band!=utils.get_freqstr_from_name(caltables[j]):
+            data[:,j*num_chan:(j+1)*num_chan,:]=np.nan
+            continue
+        data[:,j*num_chan:(j+1)*num_chan,:]=get_gain_amplitude(caltables[j])
+        
+    fig,ax=plt.subplots(nrows=2,ncols=1,sharex=True,figsize=[15,10])
+
+    for ind,pol in zip([0,1],['XX','YY']):
+        im=ax[ind].imshow(data[ind,:,:],origin='lower',interpolation='none',vmax=0.005,\
+                            vmin=0.0002,cmap='viridis',extent=(0,351,13,87),aspect='auto')
+        ax[ind].set_title(pol)
+        plt.colorbar(im,ax=ax[ind])
+
+    fig.suptitle(utils.get_timestr_from_name(caltables[0]))
+    fig.supxlabel("Antenna")
+    fig.supylabel("Gain amplitude")
+
+    if not savefig:
+        savefig='_'.join(caltables[0].split('_')[:-1])+".png"
+    plt.savefig(savefig)
+    plt.close()
+    return
         
 def convert_caltables_for_fast_vis(solar_ms,calib_ms,caltables):
     fast_caltables=[]
