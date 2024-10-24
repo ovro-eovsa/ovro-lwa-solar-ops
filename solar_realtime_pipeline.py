@@ -66,6 +66,52 @@ def set_memory_limit(percentage=0.1):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     resource.setrlimit(resource.RLIMIT_AS, (int(get_memory() * 1024 * percentage), hard))
 
+def source_riseset(skycoord, date_time,observatory='ovro', altitude_limit=15):
+    '''
+    :param date_time: input time in astropy.time.Time format
+    :param observatory: name of the observatory recognized by astropy
+    :param altitude_limit: lower limit of altitude to consider. Default to 15 degrees.
+    :param skycoord: Source can be provided by using a astropy skycoordinate. 
+                     
+    :return trise, tset  ## has 30 min resolution
+    '''
+    try:
+        date_mjd = Time(date_time).mjd
+    except Exception as e:
+        logging.error(e)
+
+    obs = EarthLocation.of_site(observatory)
+    t0 = Time(int(date_mjd), format='mjd')
+    source_rise=t0
+    
+
+    alt = skycoord.transform_to(AltAz(obstime=t0, location=obs)).alt.degree
+
+    source_risen=False
+    if alt>altitude_limit:
+        source_risen=True
+    
+    if not source_risen:    
+        while alt < altitude_limit:
+            source_rise += TimeDelta(1800., format='sec')
+            alt = skycoord.transform_to(AltAz(obstime=source_rise, location=obs)).alt.degree
+            
+        source_set=source_rise+TimeDelta(1800., format='sec')
+        while alt > altitude_limit:
+            source_set += TimeDelta(1800., format='sec')
+            alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
+        return source_rise,source_set
+    else:
+        while alt > altitude_limit:
+            source_rise -= TimeDelta(1800., format='sec')
+            alt = skycoord.transform_to(AltAz(obstime=source_rise, location=obs)).alt.degree
+        
+        source_set=t0
+        while alt>altitude_limit:
+            source_set += TimeDelta(1800., format='sec')
+            alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
+        return source_rise,source_set
+    
 
 def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
     '''
@@ -73,6 +119,9 @@ def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
     :param date: input time in astropy.time.Time format
     :param observatory: name of the observatory recognized by astropy
     :param altitude_limit: lower limit of altitude to consider. Default to 15 degrees.
+    
+                     
+    :return trise, tset
     '''
     try:
         date_mjd = Time(date).mjd
@@ -81,7 +130,9 @@ def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
 
     obs = EarthLocation.of_site(observatory)
     t0 = Time(int(date_mjd) + 13. / 24., format='mjd')
+    
     sun_loc = get_body('sun', t0, location=obs)
+    
     alt = sun_loc.transform_to(AltAz(obstime=t0, location=obs)).alt.degree
     while alt < altitude_limit:
         t0 += TimeDelta(60., format='sec')
