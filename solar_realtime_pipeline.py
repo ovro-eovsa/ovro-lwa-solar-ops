@@ -177,7 +177,7 @@ def download_msfiles_cmd(msfile_path, server, destination):
     if std_err:
         print('<<',Time.now().isot,'>>',std_err)
 
-def download_msfiles(msfiles, destination='/fast/solarpipe/realtime_pipeline/slow_working/', bands=None, verbose=True, server=None, maxthread=6):
+def download_msfiles(msfiles, destination='/fast/solarpipe/realtime_pipeline/slow_working/', bands=None, verbose=True, server=None, maxthread=3):
     from multiprocessing.pool import ThreadPool
     """
     Parallelized downloading for msfiles returned from list_msfiles() to a destination.
@@ -284,7 +284,12 @@ def download_calibms(calib_time, download_fold = '/lustre/solarpipe/realtime_pip
     ms_calib.sort()
     if doflag:
         for ms_calib_ in ms_calib:
-           antflagfile = flagging.flag_bad_ants(ms_calib_)
+            try:
+               antflagfile = flagging.flag_bad_ants(ms_calib_)
+            except:
+                exc_type, exc_obj, exc_tb = sys.exc_info()
+                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                logging.error(exc_type, fname, exc_tb.tb_lineno)
     return ms_calib
 
 
@@ -493,7 +498,9 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
             msfile_slfcaled = visdir_slfcaled + '/' + os.path.basename(outms)
             return msfile_slfcaled
         except Exception as e:
-            logging.error(e)
+            exc_type, exc_obj, exc_tb = sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            logging.error(exc_type, fname, exc_tb.tb_lineno)
             return -1
     elif len(msfile_cal_) > 0:
         msfile_cal = msfile_cal_[0]
@@ -543,7 +550,7 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         sclfactor = 1. / jones_matrices[0][0]
         helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun') 
-        default_wscleancmd = "wsclean -j 1 -mem 2 -quiet -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs " + str(briggs) + " -minuv-l 10 -auto-threshold 3 -name " + helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes
+        default_wscleancmd = "wsclean -j 2 -mem 4 -quiet -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs " + str(briggs) + " -minuv-l 10 -auto-threshold 3 -name " + helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes
 
         if nch_out>1:
             # default to be used for slow visibility imaging for fine channel imaging
@@ -721,7 +728,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             calib_file = '20240117_145752',
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
-            bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
+            bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
+            clear_old_files=True, clear_older_than=45):
     """
     Pipeline for processing and imaging slow visibility data
     :param time_start: start time of the visibility data to be processed
@@ -831,6 +839,12 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
     if not os.path.exists(allsky_dir_figs):
         os.makedirs(allsky_dir_figs)
+
+    if clear_old_files:
+        remove_old_items(visdir_work, clear_older_than)
+        remove_old_items(visdir_slfcaled, clear_older_than)
+        #remove_old_items(visdir_calib, clear_older_than)
+        remove_old_items(imagedir_allch, clear_older_than)
 
     try:
         print('<<',Time.now().isot,'>>')
@@ -1037,7 +1051,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                 os.system('rm -rf '+ visdir_slfcaled + '/' + timestr1 + '_*'+freqstr+'*.ms')
                 if do_selfcal:
                     os.system('rm -rf '+ gaintable_folder + '/' + timestr1 + '_*'+freqstr+'*')
-                os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*')
+                os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*.cl')
+                os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*.ms')
+                os.system('rm -rf '+ visdir_work + '/' + timestr1 + '_*'+freqstr+'*.fits')
             return False
 
         new_caltables={}
@@ -1352,13 +1368,40 @@ def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir
       
     else:
         return None, False
+
+
+import os
+import time
+import shutil
+from datetime import datetime
+
+def remove_old_items(directory=".", minutes=45):
+    """
+    Remove files and folders older than specified minutes in the given directory
+    """
+    current_time = time.time()
+    cutoff_time = current_time - (minutes * 60)
     
+    for item in os.listdir(directory):
+        item_path = os.path.join(directory, item)
+        item_time = os.path.getctime(item_path)
+        
+        if item_time < cutoff_time:
+            try:
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                else:
+                    shutil.rmtree(item_path)
+            except Exception as e:
+                pass
         
 
 def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay_from_now=180., do_selfcal=True, num_phase_cal=0, num_apcal=1, 
         server=None, lustre=True, file_path='slow', multinode=True, slurmmanaged=True, taskids='0123456789', delete_ms_slfcaled=True, slowfast='slow', 
         logger_dir = '/lustre/solarpipe/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
-        proc_dir = '/fast/solarpipe/realtime_pipeline/',
+        #proc_dir = '/fast/solarpipe/realtime_pipeline/',
+        proc_dir = '/dev/shm/srtmp/',
+        proc_dir_isolation = True,
         save_dir = '/lustre/solarpipe/realtime_pipeline/',
         calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables/',
         calib_file = '20240117_145752', altitude_limit=10., 
@@ -1369,7 +1412,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
         stop_at_sunset=True,
         do_daily_refracorr=True,
-        slurm_kill_after_sunset=False):
+        slurm_kill_after_sunset=False,
+        clear_old_files=True, clear_older_than=30):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -1397,12 +1441,6 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     :param save_allsky: if True, save the allsky image FITS file into save_dir + 'allsky/'
     '''
 
-    print('<<',Time.now().isot,'>>','Starting solar real-time pipeline')
-    try:
-        time_start = Time(time_start)
-    except Exception as e:
-        logging.error(e)
-        raise e
 
     if slurmmanaged:       
         task_id = int(os.environ.get('SLURM_PROCID', 0))
@@ -1410,6 +1448,23 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         current_task_id = task_id    
     else:
         current_task_id = int(socket.gethostname()[-2:])
+
+    # create proc_dir if not exist
+    if not os.path.exists(proc_dir):
+        os.makedirs(proc_dir)
+
+    if proc_dir_isolation:
+        proc_dir = proc_dir + 'task_' + str(current_task_id) + '/'
+        if not os.path.exists(proc_dir):
+            os.makedirs(proc_dir)
+
+    print('<<',Time.now().isot,'>>','Starting solar real-time pipeline')
+    try:
+        time_start = Time(time_start)
+    except Exception as e:
+        logging.error(e)
+        raise e
+
         
     (t_rise, t_set) = sun_riseset(time_start, altitude_limit=altitude_limit)
     # set up logging file
@@ -1489,12 +1544,15 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             time1 = timeit.default_timer()
         logging.info('{0:s}: Start processing {1:s}'.format(socket.gethostname(), time_start.isot))
 
+        # do one round of cleaning up old files before pipeline_quick
+
         res = pipeline_quick(time_start, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, 
                             server=server, lustre=lustre, file_path=file_path, slowfast=slowfast, delete_ms_slfcaled=delete_ms_slfcaled,
                             logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, 
                             calib_file=calib_file, delete_working_ms=delete_working_ms,
                             delete_working_fits=delete_working_fits, do_refra=do_refra,
-                            beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky, save_allsky=save_allsky)
+                            beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky, save_allsky=save_allsky,
+                            clear_old_files=clear_old_files, clear_older_than=clear_older_than)
 
         time2 = timeit.default_timer()
         if res:
@@ -1562,7 +1620,6 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 if twait.sec > 0:
                     sleep(twait.sec + 60. + delay_by_node) 
 
-
 if __name__=='__main__':
     """
     Main routine of running the realtime pipeline. Example call
@@ -1571,6 +1628,9 @@ if __name__=='__main__':
     Sometimes afer killing the pipeline (with ctrl c), one need to remove the temporary files and kill all the processes before restarting.
         pdsh -w lwacalim[00-09] 'rm -rf /fast/solarpipe/realtime_pipeline/slow_working/*'
         pdsh -w lwacalim[00-09] 'rm -rf /fast/solarpipe/realtime_pipeline/slow_slfcaled/*'
+        pdsh -w lwacalim[00-09] 'rm -rf /fast/solarpipe/realtime_pipeline/fast_working/*'
+        pdsh -w lwacalim[00-09] 'rm -rf /fast/solarpipe/realtime_pipeline/fast_slfcaled/*'
+        pdsh -w lwacalim[00-09] 'rm -rf /dev/shm/srtmp/*' # clear ram disk
         pdsh -w lwacalim[00-09] 'pkill -u solarpipe -f wsclean'
         pdsh -w lwacalim[00-09] 'pkill -u solarpipe -f python'
     """
@@ -1583,7 +1643,7 @@ if __name__=='__main__':
     parser.add_argument('--server', default=None, help='Name of the server where the raw data is located. Must be defined in ~/.ssh/config.')
     parser.add_argument('--nolustre', default=False, help='If set, do NOT assume that the data are stored under /lustre/pipeline/ in the default tree', action='store_true')
     parser.add_argument('--file_path', default='slow/', help='Specify where the raw data is located')
-    parser.add_argument('--proc_dir', default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
+    parser.add_argument('--proc_dir', default='/dev/shm/srtmp/' )# default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
     parser.add_argument('--save_dir', default='/lustre/solarpipe/realtime_pipeline/', help='Directory for saving fits files')
     parser.add_argument('--calib_dir', default='/lustre/solarpipe/realtime_pipeline/caltables/', help='Directory to calibration tables')
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
