@@ -726,7 +726,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             save_dir = '/lustre/solarpipe/realtime_pipeline/',
             calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables/',
             calib_file = '20240117_145752',
-            delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6,
+            delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6, save_selfcaltab=False,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
             bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
             clear_old_files=True, clear_older_than=45):
@@ -791,6 +791,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     imagedir_allch = proc_dir + '/'+ slowfast +'_images_allch/'
     flagdir = save_dir + '/flags/'
     refradir = save_dir + '/refra/'
+    caltabarchive = save_dir + '/caltablearchive/'
 
     imagedir_allch_combined = save_dir + '/fits/' + slowfast + '/'
     hdf_dir = save_dir + '/hdf/' + slowfast + '/'
@@ -839,6 +840,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
     if not os.path.exists(allsky_dir_figs):
         os.makedirs(allsky_dir_figs)
+
+    if not os.path.exists(caltabarchive):
+        os.makedirs(caltabarchive)
 
     if clear_old_files:
         remove_old_items(visdir_work, clear_older_than)
@@ -910,6 +914,25 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         prev_calfiles=glob.glob(os.path.join(gaintable_folder,"*.gcal"))#### these files will be deleted in this cycle
         prev_allsky_imgs = glob.glob(os.path.join(visdir_work,'*_allsky-image.fits'))
         
+                
+        if save_selfcaltab and slowfast.lower()=='slow':
+
+            if len(prev_calfiles) > 0:
+                logging.info('Saving gain tables to '+caltabarchive)
+                logging.info('prev_files : '+str(prev_calfiles))
+                gaintables_sub = caltabarchive + '/' + timestr[0:8] + '/' + timestr +'/'
+                if not os.path.exists(gaintables_sub):
+                    os.makedirs(gaintables_sub)
+                for g in prev_calfiles:
+                    os.system('cp -r ' + g + ' ' + gaintables_sub)
+            else:
+                logging.info('No gain tables found for {0:s}'.format(timestr))     
+        else:
+            logging.info('No gain tables saved for {0:s}'.format(timestr))
+            logging.info(str(save_selfcaltab)+ ' '+str(slowfast.lower()=='slow'))
+            print('<<',Time.now().isot,'>>','No gain tables saved for {0:s}'.format(timestr))
+
+
         msfiles_slfcaled = glob.glob(visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
         msfiles_slfcaled.sort()
         if len(msfiles_slfcaled) == 0 or overwrite_ms:
@@ -971,7 +994,6 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     else:
                         logging.info('All sky image {0:s} does not exist.'.format(\
                                         visdir_work + '/' + timestr1 + '_' + freqstr + '*_allsky-image.fits'))
-
 
 
                 if delete_working_ms:
@@ -1409,6 +1431,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         briggs=-0.5,
         delete_working_ms=True, do_refra=True, delete_working_fits=True,
         do_imaging=True, delete_allsky=False, save_allsky=False,
+        save_selfcaltab=False,
         bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
         stop_at_sunset=True,
         do_daily_refracorr=True,
@@ -1552,7 +1575,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                             calib_file=calib_file, delete_working_ms=delete_working_ms,
                             delete_working_fits=delete_working_fits, do_refra=do_refra,
                             beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky, save_allsky=save_allsky,
-                            clear_old_files=clear_old_files, clear_older_than=clear_older_than)
+                            clear_old_files=clear_old_files, clear_older_than=clear_older_than, save_selfcaltab=save_selfcaltab)
 
         time2 = timeit.default_timer()
         if res:
@@ -1658,6 +1681,7 @@ if __name__=='__main__':
     parser.add_argument('--keep_working_ms', default=False, help='If True, keep the working ms files after imaging', action='store_true')
     parser.add_argument('--keep_working_fits', default=False, help='If True, keep the working fits files after imaging', action='store_true')
     parser.add_argument('--save_allsky', default=False, help='If True, save the band-averaged all sky images', action='store_true')
+    parser.add_argument('--save_selfcaltab', default=True, help='If True, save the selfcalibration tables', action='store_true')
     parser.add_argument('--no_selfcal', default=False, help='If set, do not do selfcal regardless slow or fast', action='store_true')
     parser.add_argument('--no_imaging', default=False, help='If set, do not perform imaging', action='store_true')
     parser.add_argument('--nonstop', default=False, help='If set, the script will be run without stopping', action='store_true')
@@ -1701,7 +1725,8 @@ if __name__=='__main__':
                      do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
                      delete_working_fits=(not args.keep_working_fits), save_allsky=args.save_allsky, beam_fit_size=args.bmfit_sz, briggs=args.briggs,
                      do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop),
-                     do_daily_refracorr=(not args.no_refracorr), slurm_kill_after_sunset=args.slurm_kill_after_sunset)
+                     do_daily_refracorr=(not args.no_refracorr), slurm_kill_after_sunset=args.slurm_kill_after_sunset, 
+                     save_selfcaltab=args.save_selfcaltab)
     except Exception as e:
         logging.error(e)
         raise e

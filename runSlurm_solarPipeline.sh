@@ -39,7 +39,8 @@ case "$1" in
         ;;
     slow)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-        --briggs -1.0 --slowfast slow --interval 300 --delay 180 --save_allsky --no_refracorr --slurm_kill_after_sunset --keep_working_fits
+        --briggs -1.0 --slowfast slow --interval 300 --delay 180 --save_allsky \
+        --no_refracorr --slurm_kill_after_sunset --keep_working_fits --save_selfcaltab
         ;;
     fast)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
@@ -55,7 +56,7 @@ case "$1" in
     slownorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
             --briggs -1.0 --slowfast slow --interval 100 --delay 180   --no_refracorr\
-            --start_time 2024-10-31T20:05:00 --end_time 2024-10-31T23:25:00
+            --start_time 2024-10-31T20:05:00 --end_time 2024-10-31T23:25:00 --save_selfcaltab
         ;;
     fastnorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
