@@ -488,7 +488,7 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
     else:
         return bcaltbs
 
-def get_gain_amplitude(caltable):
+def get_gain_amplitude_phase(caltable):
     tb=table()
     tb.open(caltable)
     try:
@@ -499,16 +499,54 @@ def get_gain_amplitude(caltable):
 
     pos=np.where(flag==True)
     data[pos]=np.nan
-    return np.abs(data)
+    return np.abs(data),np.angle(data)
 
-def get_caltable_freq_str(caltable):
+def get_caltable_freq(caltable):
     tb=table()
     tb.open(os.path.join(caltable,"SPECTRAL_WINDOW"))
     try:
-        chan_freq=tb.getcol('CHAN_FREQ')[0][0]/1e6  ### converting to MHz
+        chan_freq=tb.getcol('CHAN_FREQ').flatten()
     finally:
         tb.close()
     return chan_freq
+
+def robust_linear_fit(x,y,num_trial=5,thresh=3):
+    for i in range(num_trial):
+        pos=np.where(np.isnan(y)==False)
+        poly=np.polyfit(x[pos],y[pos],deg=1)
+        predicted_y=np.poly1d(poly)(x)
+        residual=predicted_y-y
+        std=np.nanstd(residual)
+        pos=np.where(residual>thresh*std)
+        y[pos]=np.nan
+    return poly
+    
+def find_delay(freqs,phase):
+    pos=np.where(phase<0)[0]
+    if pos.size>0:
+        phase+=2*np.pi ### assume that phase is from -pi to pi
+
+    pos=np.where((np.isnan(phase)==False) & (freqs>40*1e6))[0]
+    if pos.size==0:
+        return np.nan
+    phase1=phase[pos]
+    freqs1=freqs[pos]/1e6 ### converting to MHz
+    unwrapped_phase=np.unwrap(phase1)
+    delay=robust_linear_fit(freqs1,unwrapped_phase)[0]/(2*np.pi) ### delay is in microseconds
+    return delay
+    
+def find_delay_all_ant_corr(freqs,phase):
+    phase_shape=phase.shape
+    num_corr=phase_shape[0]
+    num_ant=phase_shape[2]
+    
+    delay=np.zeros((num_corr,num_ant))*np.nan
+    
+    for i in range(num_corr):
+        for j in range(num_ant):
+            wrapped_phase=phase[i,:,j]
+            delay[i,j]=find_delay(freqs,wrapped_phase)
+    return delay
     
 def create_waterfall_plot(caltables,msnames,figname=None,num_chan=192,num_ant=352):
     
@@ -526,20 +564,24 @@ def create_waterfall_plot(caltables,msnames,figname=None,num_chan=192,num_ant=35
     ms_freqs_str=[]
     caltable_freqs=np.zeros(len(caltables))
     
-    data=np.zeros((2,num_bands*num_chan,num_ant))
+    amp=np.zeros((2,num_bands*num_chan,num_ant))
+    phase=np.zeros((2,num_bands*num_chan,num_ant))
+    freqs=np.zeros((num_bands*num_chan))
 
     for j,msname in enumerate(msnames):
         ms_freqs_str.append(utils.get_freqstr_from_name(msname))
     
     for j,caltable in enumerate(caltables):
-        caltable_freqs[j]=get_caltable_freq_str(caltable)
+        caltable_freqs[j]=get_caltable_freq(caltable)[0]/1e6 ### converting to MHz
     
 
     j=0   
     for k,band in enumerate(bands):
         if band!=ms_freqs_str[j]:
             print ("MS file for "+band+" is missing")
-            data[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            amp[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            phase[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            freqs[k*num_chan:(k+1)*num_chan]=np.nan
             continue    
         msname=msnames[j]
         ms_freq_MHz=int(ms_freqs_str[j].split('MHz')[0])
@@ -547,15 +589,21 @@ def create_waterfall_plot(caltables,msnames,figname=None,num_chan=192,num_ant=35
         #ind=caltable_freqs.index(ms_freqs[j])
         if abs(ms_freq_MHz-caltable_freqs[ind])>2:
             print ("Freq index not found. Some caltables have not been produced")
-            data[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            amp[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            phase[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            freqs[k*num_chan:(k+1)*num_chan]=np.nan
         else:    
-            data[:,k*num_chan:(k+1)*num_chan,:]=get_gain_amplitude(caltables[ind])
+            amp[:,k*num_chan:(k+1)*num_chan,:], phase[:,k*num_chan:(k+1)*num_chan,:]=\
+                                                            get_gain_amplitude_phase(caltables[ind])
+            freqs[k*num_chan:(k+1)*num_chan]=get_caltable_freq(caltables[ind])
         j+=1
+    
+    delays=find_delay_all_ant_corr(freqs,phase)
         
     fig,ax=plt.subplots(nrows=2,ncols=1,sharex=True,figsize=[15,10])
 
     for ind,pol in zip([0,1],['XX','YY']):
-        im=ax[ind].imshow(data[ind,:,:],origin='lower',interpolation='none',vmax=0.005,\
+        im=ax[ind].imshow(amp[ind,:,:],origin='lower',interpolation='none',vmax=0.005,\
                             vmin=0.0002,cmap='viridis',extent=(0,351,13,87),aspect='auto')
         ax[ind].set_title(pol)
         plt.colorbar(im,ax=ax[ind])
@@ -564,10 +612,29 @@ def create_waterfall_plot(caltables,msnames,figname=None,num_chan=192,num_ant=35
     fig.supxlabel("Antenna")
     fig.supylabel("Gain amplitude")
 
-    if not figname:
-        figname='_'.join(caltables[0].split('_')[:-1])+".png"
-    plt.savefig(figname)
+    if not isinstance(figname,list):
+        figname_amp='_'.join(caltables[0].split('_')[:-1])+"_amp.png"
+    else:
+        figname_amp=figname[0]
+    plt.savefig(figname_amp)
     plt.close()
+    
+    fig,ax=plt.subplots(nrows=2,ncols=1,sharex=True,figsize=[12,10])
+    
+    for ind,pol in zip([0,1],['XX','YY']):
+        im=ax[ind].plot(delays[ind],'ro')
+        ax[ind].set_title(pol)
+
+    fig.suptitle(utils.get_timestr_from_name(caltables[0]))
+    fig.supxlabel("Antenna")
+    fig.supylabel("Delay (microseconds)")
+    if not isinstance(figname,list):
+        figname_delay='_'.join(caltables[0].split('_')[:-1])+"_delay.png"
+    else:
+        figname_delay=figname[1]
+    plt.savefig(figname_delay)
+    plt.close()
+    
     return
         
 def convert_caltables_for_fast_vis(solar_ms,calib_ms,caltables):
