@@ -90,7 +90,7 @@ def source_riseset(skycoord, date_time,observatory='ovro', altitude_limit=15):
     source_risen=False
     if alt>altitude_limit:
         source_risen=True
-    
+
     if not source_risen:    
         while alt < altitude_limit:
             source_rise += TimeDelta(1800., format='sec')
@@ -107,9 +107,11 @@ def source_riseset(skycoord, date_time,observatory='ovro', altitude_limit=15):
             alt = skycoord.transform_to(AltAz(obstime=source_rise, location=obs)).alt.degree
         
         source_set=t0
+        alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
         while alt>altitude_limit:
             source_set += TimeDelta(1800., format='sec')
             alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
+
         return source_rise,source_set
     
 
@@ -427,6 +429,7 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
         print('Input not recognized. Abort...')
         return -1
 
+    
     if len(ms_calib) > 0:
         # TODO: somehow the parallel processing failed if flagging has run. I have no idea why. Returning to the slow serial processing.
         #pool = multiprocessing.pool.Pool(processes=len(ms_calib))
@@ -448,9 +451,10 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
             except Exception as e:
                 print('Something is wrong when making calibrations for ', ms_calib_)
                 print(e)
+            
         chan_freqs = np.concatenate(chan_freqs)
-        if do_plot:
-            get_waterfall_plot(bcaltbs,ms_calib)
+        if doplot:
+            create_waterfall_plot(bcaltbs,ms_calib)
     else:
         print('The list of calibration ms files seems to be empty. Abort...')
         return -1
@@ -484,34 +488,69 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
     else:
         return bcaltbs
 
+def get_gain_amplitude(caltable):
+    tb=table()
+    tb.open(caltable)
+    try:
+        data=tb.getcol('CPARAM')
+        flag=tb.getcol('FLAG')
+    finally:
+        tb.close()
 
-def get_waterfall_plot(caltables,msnames,savefig=None,num_chan=192,num_ant=352):
+    pos=np.where(flag==True)
+    data[pos]=np.nan
+    return np.abs(data)
 
+def get_caltable_freq_str(caltable):
+    tb=table()
+    tb.open(os.path.join(caltable,"SPECTRAL_WINDOW"))
+    try:
+        chan_freq=tb.getcol('CHAN_FREQ')[0][0]/1e6  ### converting to MHz
+    finally:
+        tb.close()
+    return chan_freq
+    
+def create_waterfall_plot(caltables,msnames,figname=None,num_chan=192,num_ant=352):
+    
+    bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
+            '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
+            '78MHz', '82MHz']
+            
     msnames.sort()
     
-    assert len(caltables)==len(msnames),"The number of MS and caltables do not match. Please check"
+    assert len(caltables)<=len(msnames),"The number of MS is smaller than the number of caltables. Please check"
 
     num_msnames=len(msnames)
-    freqs=[]
-    #channels=np.zeros((len(bands)*num_chan,num_ant))
-    data=np.zeros((2,num_msnames*num_chan,num_ant))
+    num_bands=len(bands)
+    
+    ms_freqs_str=[]
+    caltable_freqs=np.zeros(len(caltables))
+    
+    data=np.zeros((2,num_bands*num_chan,num_ant))
 
     for j,msname in enumerate(msnames):
-        freqs.append(utils.get_freqstr_from_name(msname))
+        ms_freqs_str.append(utils.get_freqstr_from_name(msname))
+    
+    for j,caltable in enumerate(caltables):
+        caltable_freqs[j]=get_caltable_freq_str(caltable)
+    
 
-   
-    for j in range(num_msnames):
-
-        try:
-            ind=freqs.index(freqs[j])
-        except ValueError:
-            print ("Freq index not found. Is this a file from OVRO-LWA? Setting gains to 0")
-            data[:,j*num_chan:(j+1)*num_chan,:]=np.nan
-            continue
-        if band!=utils.get_freqstr_from_name(caltables[j]):
-            data[:,j*num_chan:(j+1)*num_chan,:]=np.nan
-            continue
-        data[:,j*num_chan:(j+1)*num_chan,:]=get_gain_amplitude(caltables[j])
+    j=0   
+    for k,band in enumerate(bands):
+        if band!=ms_freqs_str[j]:
+            print ("MS file for "+band+" is missing")
+            data[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            continue    
+        msname=msnames[j]
+        ms_freq_MHz=int(ms_freqs_str[j].split('MHz')[0])
+        ind=np.argmin(abs(ms_freq_MHz-caltable_freqs))
+        #ind=caltable_freqs.index(ms_freqs[j])
+        if abs(ms_freq_MHz-caltable_freqs[ind])>2:
+            print ("Freq index not found. Some caltables have not been produced")
+            data[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+        else:    
+            data[:,k*num_chan:(k+1)*num_chan,:]=get_gain_amplitude(caltables[ind])
+        j+=1
         
     fig,ax=plt.subplots(nrows=2,ncols=1,sharex=True,figsize=[15,10])
 
@@ -525,9 +564,9 @@ def get_waterfall_plot(caltables,msnames,savefig=None,num_chan=192,num_ant=352):
     fig.supxlabel("Antenna")
     fig.supylabel("Gain amplitude")
 
-    if not savefig:
-        savefig='_'.join(caltables[0].split('_')[:-1])+".png"
-    plt.savefig(savefig)
+    if not figname:
+        figname='_'.join(caltables[0].split('_')[:-1])+".png"
+    plt.savefig(figname)
     plt.close()
     return
         
