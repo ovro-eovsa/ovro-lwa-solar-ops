@@ -69,6 +69,54 @@ def set_memory_limit(percentage=0.1):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     resource.setrlimit(resource.RLIMIT_AS, (int(get_memory() * 1024 * percentage), hard))
 
+def source_riseset(skycoord, date_time,observatory='ovro', altitude_limit=15):
+    '''
+    :param date_time: input time in astropy.time.Time format
+    :param observatory: name of the observatory recognized by astropy
+    :param altitude_limit: lower limit of altitude to consider. Default to 15 degrees.
+    :param skycoord: Source can be provided by using a astropy skycoordinate. 
+                     
+    :return trise, tset  ## has 30 min resolution
+    '''
+    try:
+        date_mjd = Time(date_time).mjd
+    except Exception as e:
+        logging.error(e)
+
+    obs = EarthLocation.of_site(observatory)
+    t0 = Time(int(date_mjd), format='mjd')
+    source_rise=t0
+    
+
+    alt = skycoord.transform_to(AltAz(obstime=t0, location=obs)).alt.degree
+
+    source_risen=False
+    if alt>altitude_limit:
+        source_risen=True
+
+    if not source_risen:    
+        while alt < altitude_limit:
+            source_rise += TimeDelta(1800., format='sec')
+            alt = skycoord.transform_to(AltAz(obstime=source_rise, location=obs)).alt.degree
+            
+        source_set=source_rise+TimeDelta(1800., format='sec')
+        while alt > altitude_limit:
+            source_set += TimeDelta(1800., format='sec')
+            alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
+        return source_rise,source_set
+    else:
+        while alt > altitude_limit:
+            source_rise -= TimeDelta(1800., format='sec')
+            alt = skycoord.transform_to(AltAz(obstime=source_rise, location=obs)).alt.degree
+        
+        source_set=t0
+        alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
+        while alt>altitude_limit:
+            source_set += TimeDelta(1800., format='sec')
+            alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
+
+        return source_rise,source_set
+    
 
 def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
     '''
@@ -76,6 +124,9 @@ def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
     :param date: input time in astropy.time.Time format
     :param observatory: name of the observatory recognized by astropy
     :param altitude_limit: lower limit of altitude to consider. Default to 15 degrees.
+    
+                     
+    :return trise, tset
     '''
     try:
         date_mjd = Time(date).mjd
@@ -84,7 +135,9 @@ def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
 
     obs = EarthLocation.of_site(observatory)
     t0 = Time(int(date_mjd) + 13. / 24., format='mjd')
+    
     sun_loc = get_body('sun', t0, location=obs)
+    
     alt = sun_loc.transform_to(AltAz(obstime=t0, location=obs)).alt.degree
     while alt < altitude_limit:
         t0 += TimeDelta(60., format='sec')
@@ -289,7 +342,7 @@ def download_calibms(calib_time, download_fold = '/lustre/solarpipe/realtime_pip
 
 
 def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger=True, 
-        proc_dir='./'):
+        proc_dir='./',doplot=True):
     """
     Function to generate calibration tables for a list of calibration ms files
     :param calib_in: input used for calibration. This can be either a) a string of time stamp recognized by astropy.time.Time 
@@ -330,6 +383,7 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
         print('<<',Time.now().isot,'>>','Input not recognized. Abort...')
         return -1
 
+    
     if len(ms_calib) > 0:
         # TODO: somehow the parallel processing failed if flagging has run. I have no idea why. Returning to the slow serial processing.
         #pool = multiprocessing.pool.Pool(processes=len(ms_calib))
@@ -351,7 +405,10 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
             except Exception as e:
                 print('<<',Time.now().isot,'>>','Something is wrong when making calibrations for ', ms_calib_)
                 print(e)
+            
         chan_freqs = np.concatenate(chan_freqs)
+        if doplot:
+            create_waterfall_plot(bcaltbs,ms_calib)
     else:
         print('<<',Time.now().isot,'>>','The list of calibration ms files seems to be empty. Abort...')
         return -1
@@ -384,6 +441,155 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
         return bcaltbs, bcaltbs_bm, bcalfac_file
     else:
         return bcaltbs
+
+def get_gain_amplitude_phase(caltable):
+    tb=table()
+    tb.open(caltable)
+    try:
+        data=tb.getcol('CPARAM')
+        flag=tb.getcol('FLAG')
+    finally:
+        tb.close()
+
+    pos=np.where(flag==True)
+    data[pos]=np.nan
+    return np.abs(data),np.angle(data)
+
+def get_caltable_freq(caltable):
+    tb=table()
+    tb.open(os.path.join(caltable,"SPECTRAL_WINDOW"))
+    try:
+        chan_freq=tb.getcol('CHAN_FREQ').flatten()
+    finally:
+        tb.close()
+    return chan_freq
+
+def robust_linear_fit(x,y,num_trial=5,thresh=3):
+    for i in range(num_trial):
+        pos=np.where(np.isnan(y)==False)
+        poly=np.polyfit(x[pos],y[pos],deg=1)
+        predicted_y=np.poly1d(poly)(x)
+        residual=predicted_y-y
+        std=np.nanstd(residual)
+        pos=np.where(residual>thresh*std)
+        y[pos]=np.nan
+    return poly
+    
+def find_delay(freqs,phase):
+    pos=np.where(phase<0)[0]
+    if pos.size>0:
+        phase+=2*np.pi ### assume that phase is from -pi to pi
+
+    pos=np.where((np.isnan(phase)==False) & (freqs>40*1e6))[0]
+    if pos.size==0:
+        return np.nan
+    phase1=phase[pos]
+    freqs1=freqs[pos]/1e6 ### converting to MHz
+    unwrapped_phase=np.unwrap(phase1)
+    delay=robust_linear_fit(freqs1,unwrapped_phase)[0]/(2*np.pi) ### delay is in microseconds
+    return delay
+    
+def find_delay_all_ant_corr(freqs,phase):
+    phase_shape=phase.shape
+    num_corr=phase_shape[0]
+    num_ant=phase_shape[2]
+    
+    delay=np.zeros((num_corr,num_ant))*np.nan
+    
+    for i in range(num_corr):
+        for j in range(num_ant):
+            wrapped_phase=phase[i,:,j]
+            delay[i,j]=find_delay(freqs,wrapped_phase)
+    return delay
+    
+def create_waterfall_plot(caltables,msnames,figname=None,num_chan=192,num_ant=352):
+    
+    bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
+            '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
+            '78MHz', '82MHz']
+            
+    msnames.sort()
+    
+    assert len(caltables)<=len(msnames),"The number of MS is smaller than the number of caltables. Please check"
+
+    num_msnames=len(msnames)
+    num_bands=len(bands)
+    
+    ms_freqs_str=[]
+    caltable_freqs=np.zeros(len(caltables))
+    
+    amp=np.zeros((2,num_bands*num_chan,num_ant))
+    phase=np.zeros((2,num_bands*num_chan,num_ant))
+    freqs=np.zeros((num_bands*num_chan))
+
+    for j,msname in enumerate(msnames):
+        ms_freqs_str.append(utils.get_freqstr_from_name(msname))
+    
+    for j,caltable in enumerate(caltables):
+        caltable_freqs[j]=get_caltable_freq(caltable)[0]/1e6 ### converting to MHz
+    
+
+    j=0   
+    for k,band in enumerate(bands):
+        if band!=ms_freqs_str[j]:
+            print ("MS file for "+band+" is missing")
+            amp[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            phase[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            freqs[k*num_chan:(k+1)*num_chan]=np.nan
+            continue    
+        msname=msnames[j]
+        ms_freq_MHz=int(ms_freqs_str[j].split('MHz')[0])
+        ind=np.argmin(abs(ms_freq_MHz-caltable_freqs))
+        #ind=caltable_freqs.index(ms_freqs[j])
+        if abs(ms_freq_MHz-caltable_freqs[ind])>2:
+            print ("Freq index not found. Some caltables have not been produced")
+            amp[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            phase[:,k*num_chan:(k+1)*num_chan,:]=np.nan
+            freqs[k*num_chan:(k+1)*num_chan]=np.nan
+        else:    
+            amp[:,k*num_chan:(k+1)*num_chan,:], phase[:,k*num_chan:(k+1)*num_chan,:]=\
+                                                            get_gain_amplitude_phase(caltables[ind])
+            freqs[k*num_chan:(k+1)*num_chan]=get_caltable_freq(caltables[ind])
+        j+=1
+    
+    delays=find_delay_all_ant_corr(freqs,phase)
+        
+    fig,ax=plt.subplots(nrows=2,ncols=1,sharex=True,figsize=[15,10])
+
+    for ind,pol in zip([0,1],['XX','YY']):
+        im=ax[ind].imshow(amp[ind,:,:],origin='lower',interpolation='none',vmax=0.005,\
+                            vmin=0.0002,cmap='viridis',extent=(0,351,13,87),aspect='auto')
+        ax[ind].set_title(pol)
+        plt.colorbar(im,ax=ax[ind])
+
+    fig.suptitle(utils.get_timestr_from_name(caltables[0]))
+    fig.supxlabel("Antenna")
+    fig.supylabel("Gain amplitude")
+
+    if not isinstance(figname,list):
+        figname_amp='_'.join(caltables[0].split('_')[:-1])+"_amp.png"
+    else:
+        figname_amp=figname[0]
+    plt.savefig(figname_amp)
+    plt.close()
+    
+    fig,ax=plt.subplots(nrows=2,ncols=1,sharex=True,figsize=[12,10])
+    
+    for ind,pol in zip([0,1],['XX','YY']):
+        im=ax[ind].plot(delays[ind],'ro')
+        ax[ind].set_title(pol)
+
+    fig.suptitle(utils.get_timestr_from_name(caltables[0]))
+    fig.supxlabel("Antenna")
+    fig.supylabel("Delay (microseconds)")
+    if not isinstance(figname,list):
+        figname_delay='_'.join(caltables[0].split('_')[:-1])+"_delay.png"
+    else:
+        figname_delay=figname[1]
+    plt.savefig(figname_delay)
+    plt.close()
+    
+    return
         
 def convert_caltables_for_fast_vis(solar_ms,calib_ms,caltables):
     fast_caltables=[]
