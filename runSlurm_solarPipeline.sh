@@ -2,11 +2,10 @@
 #SBATCH --job-name=solarpipedaily
 #SBATCH --partition=solar
 #SBATCH --ntasks=10
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=20
 #SBATCH --distribution=cyclic
-######### SBATCH  --ntasks-per-node=2
 #SBATCH --nodelist=lwacalim[05-09]
-#SBATCH --mem=160G
+#SBATCH --mem=200G
 #SBATCH --time=16:00:00
 #SBATCH --output=/lustre/solarpipe/slurmlog/%j.out
 #SBATCH --error=/lustre/solarpipe/slurmlog/%j.err
@@ -18,6 +17,8 @@
 DIRSOFT=/lustre/peijin/ovro-lwa-solar-ops/
 DIRRUN=/lustre/peijin/testslurm/ # for no realtime test
 DIR_PY_ENV=/opt/devel/bin.chen/envs/suncasa/
+CLEAR_CACHE_BEFORE_RUN=True
+
 source /home/solarpipe/.bashrc
 conda activate $DIR_PY_ENV
 
@@ -26,25 +27,44 @@ export PYTHONPATH=$DIRSOFT:$PYTHONPATH
 
 cd /lustre/solarpipe/
 
+# clear cache before run
+if [ "$CLEAR_CACHE_BEFORE_RUN" = "True" ]; then
+    echo "Clearing cache before run"
+    rm -rf /dev/shm/srtmp/*
+fi
+
 # run according to the case:
 case "$1" in
-    testnodes)
-        srun $DIR_PY_ENV/bin/python slurm_taskid_test.py
-        ;;
-    testslowfixedtime)
-        srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs -1.0 --slowfast slow --interval 600 --delay 180 --save_allsky \
-            --start_time $2 --end_time $3 \
-            --save_dir /lustre/solarpipe/test_realtime/
-        ;;
     slow)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-        --briggs -1.0 --slowfast slow --interval 300 --delay 180 --save_allsky \
+        --briggs -0.5 --slowfast slow --interval 200 --delay 180 --save_allsky \
         --no_refracorr --slurm_kill_after_sunset --keep_working_fits --save_selfcaltab
         ;;
     fast)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
             --briggs 1.0 --slowfast fast --interval 100 --delay 180
+        ;;
+    slownorealtime)
+        srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
+            --briggs -0.5 --slowfast slow --interval 100 --delay 180 --no_refracorr\
+            --start_time 2024-11-18T18:57:00 --end_time 2024-11-18T19:57:00 --save_selfcaltab
+        ;;   
+    slownorealtimecostumizeddir)
+        srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py  \
+            --briggs -0.5 --slowfast slow --interval 100 --delay 180 --no_refracorr\
+            --nolustre --file_path /lustre/solarpipe/20230927/slow/ \
+            --alt_limit 0 \
+            --bands 23MHz 27MHz 32MHz 36MHz 41MHz 46MHz 50MHz 55MHz 59MHz 64MHz 69MHz 73MHz 78MHz 82MHz \
+            --calib_file 20230925_052635 \
+            --start_time 2023-09-27T16:45:05 --end_time 2023-09-27T21:39:50 --save_selfcaltab
+        ;;
+    fastnorealtime)
+        srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
+            --briggs 1.0 --slowfast fast --interval 100 --delay 180 \
+            --start_time 2024-09-22T20:00:00 --end_time 2024-09-23T00:30:00
+        ;;
+    testnodes)
+        srun $DIR_PY_ENV/bin/python slurm_taskid_test.py
         ;;
     testnorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
@@ -53,15 +73,11 @@ case "$1" in
             --logger_dir $DIRRUN/log/ \
             --start_time 2024-10-07T19:50:00 --end_time 2024-10-07T22:00:00
         ;;
-    slownorealtime)
+    testslowfixedtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs -1.0 --slowfast slow --interval 100 --delay 180   --no_refracorr\
-            --start_time 2024-10-31T20:05:00 --end_time 2024-10-31T23:25:00 --save_selfcaltab
-        ;;
-    fastnorealtime)
-        srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs 1.0 --slowfast fast --interval 100 --delay 180 \
-            --start_time 2024-09-22T20:00:00 --end_time 2024-09-23T00:30:00
+            --briggs -1.0 --slowfast slow --interval 600 --delay 180 --save_allsky \
+            --start_time $2 --end_time $3 \
+            --save_dir /lustre/solarpipe/test_realtime/
         ;;
     *)
         echo "Usage: sbatch $0 {test|slow|fast}"
