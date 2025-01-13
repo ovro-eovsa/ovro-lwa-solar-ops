@@ -16,7 +16,7 @@
 
 DIRSOFT=/lustre/peijin/ovro-lwa-solar-ops/
 DIRRUN=/lustre/peijin/testslurm/ # for no realtime test
-DIR_PY_ENV=/opt/devel/bin.chen/envs/suncasa/
+DIR_PY_ENV=/opt/devel/peijin/solarenv    #/opt/devel/bin.chen/envs/suncasa/
 CLEAR_CACHE_BEFORE_RUN=True
 
 source /home/solarpipe/.bashrc
@@ -46,8 +46,8 @@ case "$1" in
         ;;
     slownorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs -0.5 --slowfast slow --interval 100 --delay 180 --no_refracorr\
-            --start_time 2024-11-18T18:57:00 --end_time 2024-11-18T19:57:00 --save_selfcaltab
+            --briggs -0.5 --slowfast slow --interval 100 --delay 180 --no_refracorr --alt_limit 0 \
+            --start_time 2025-01-09T17:45:00 --end_time 2025-01-09T22:30:00 --save_selfcaltab
         ;;   
     slownorealtimecostumizeddir)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py  \

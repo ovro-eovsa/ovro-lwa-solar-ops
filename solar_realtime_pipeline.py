@@ -39,6 +39,7 @@ import platform
 
 from ovrolwasolar import visualization as ovis
 from ovrolwasolar import refraction_correction as orefr
+from ovrolwasolar import coords as ocoords
 
 #import gc # garbage collection
 #gc.enable()
@@ -732,7 +733,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         return -1
 
 
-def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, stokes='I', beam_fit_size=2, briggs=-0.5):
+def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, stokes='I', beam_fit_size=2, briggs=-0.5,use_jpl_ephem=False):
     blc = int(512 - 128)
     trc = int(512 + 128 - 1)
     region='box [ [ {0:d}pix , {1:d}pix] , [{2:d}pix, {3:d}pix ] ]'.format(blc, blc, trc, trc)
@@ -759,26 +760,45 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         pb.srcjones(az=[az],el=[elev])
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         sclfactor = 1. / jones_matrices[0][0]
-        helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun') 
+        helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun')
+
+        if not os.path.exists(imagedir_allch):
+            os.makedirs(imagedir_allch)
+
+        logging.info('Imaging {0:s} with {1:s}'.format(msfile_slfcaled, helio_imagename))
+        
         default_wscleancmd = "wsclean -j 2 -mem 4 -quiet -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs " + str(briggs) + " -minuv-l 10 -auto-threshold 3 -name " + helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes
 
+        logging.info('nch_out: {0:d}'.format(nch_out))
         if nch_out>1:
             # default to be used for slow visibility imaging for fine channel imaging
             default_wscleancmd += " -join-channels -channels-out " + str(nch_out)
         
         cmd= shlex.split(default_wscleancmd + ' ' + msfile_slfcaled)
+
         wsclean_proc=subprocess.run(cmd)
+
 
         outfits = glob.glob(helio_imagename + '*-image.fits')
         outfits.sort()
+        
+        logging.info('Found {0:d} images'.format(len(outfits)))
         if len(outfits) > 0:
-            outfits_helio = hf.imreg(msfile_slfcaled, outfits, ephem=ephem, msinfo=msinfo, timerange=[tref_str] * len(outfits), 
+            if use_jpl_ephem:
+                outfits_helio = hf.imreg(msfile_slfcaled, outfits, ephem=ephem, msinfo=msinfo, timerange=[tref_str] * len(outfits), 
                     usephacenter=True, verbose=True, toTb=True, subregion=region, sclfactor=sclfactor)
+            else:
+                outfits_helio = []
+                for outfit in outfits:
+                    # single fits conversion
+                    outfits_helio.append(ocoords.fitsj2000tohelio(outfit, out_fits=None, toK=True, verbose=False, sclfactor=sclfactor, subregion=[blc, trc, blc, trc]))
+                #outfits_helio = ocoords.fitsj2000tohelio(outfits, out_fits=None, reftime="", toK=True, verbose=False, sclfactor=sclfactor)
             return outfits_helio
         else:
             logging.error('No fits images produced.')
             return -1
     except Exception as e:
+        print(e)
         logging.error(e)
         if wsclean_proc.poll() is None:
             wsclean_proc.terminate()
@@ -1457,7 +1477,8 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     etime = Time(trange['end']['m0']['value'], format='mjd')
     tref_mjd = (btime.mjd + etime.mjd) / 2. 
     tref = Time(tref_mjd, format='mjd')
-    ephem = hf.read_horizons(tref, dur=1./60./24., observatory='OVRO_MMA')
+    # ephem = hf.read_horizons(tref, dur=1./60./24., observatory='OVRO_MMA')
+    ephem=None
 
     run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, \
                 nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
@@ -1650,7 +1671,8 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         stop_at_sunset=True,
         do_daily_refracorr=True,
         slurm_kill_after_sunset=False,
-        clear_old_files=True, clear_older_than=30, actively_rm_ms=True):
+        clear_old_files=True, clear_older_than=30, actively_rm_ms=True, 
+        use_jpl_ephem=False):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -1917,7 +1939,9 @@ if __name__=='__main__':
     parser.add_argument('--no_actively_rm_ms', default=False, help='If set, actively remove the measurement sets after imaging', action='store_true')
     parser.add_argument('--no_refracorr', default=False, help='If set, do not do daily refraction correction', action='store_true')
     parser.add_argument('--slurm_kill_after_sunset', default=False, help='If set, kill all the processes with scancel after sunset', action='store_true')
-    
+    parser.add_argument('--use_jpl_ephem', default=False, help='If set, use JPL ephemeris for refraction correction', action='store_true')
+
+
     args = parser.parse_args()
     sleep(int(args.sleep_time))
 
@@ -1943,14 +1967,14 @@ if __name__=='__main__':
 
     try:
         run_pipeline(time_start=args.start_time, time_end=Time(args.end_time), time_interval=float(args.interval), taskids=args.taskids, delay_from_now=float(args.delay),
-                     server=args.server, lustre=(not args.nolustre), file_path=args.file_path,
-                     proc_dir_mem=args.proc_dir_mem, proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
-                     altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
-                     do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
-                     delete_working_fits=(not args.keep_working_fits), save_allsky=args.save_allsky, beam_fit_size=args.bmfit_sz, briggs=args.briggs,
-                     do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop),
-                     do_daily_refracorr=(not args.no_refracorr), slurm_kill_after_sunset=args.slurm_kill_after_sunset, 
-                     save_selfcaltab=args.save_selfcaltab, actively_rm_ms=(not args.no_actively_rm_ms))
+            server=args.server, lustre=(not args.nolustre), file_path=args.file_path,
+            proc_dir_mem=args.proc_dir_mem, proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
+            altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
+            do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
+            delete_working_fits=(not args.keep_working_fits), save_allsky=args.save_allsky, beam_fit_size=args.bmfit_sz, briggs=args.briggs,
+            do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop),
+            do_daily_refracorr=(not args.no_refracorr), slurm_kill_after_sunset=args.slurm_kill_after_sunset, 
+            save_selfcaltab=args.save_selfcaltab, actively_rm_ms=(not args.no_actively_rm_ms), use_jpl_ephem=args.use_jpl_ephem)
     except Exception as e:
         logging.error(e)
         raise e
