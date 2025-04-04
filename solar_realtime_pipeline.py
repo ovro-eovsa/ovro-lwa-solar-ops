@@ -39,6 +39,7 @@ import platform
 
 from ovrolwasolar import visualization as ovis
 from ovrolwasolar import refraction_correction as orefr
+from ovrolwasolar import coords as ocoords
 
 #import gc # garbage collection
 #gc.enable()
@@ -642,7 +643,7 @@ def check_fast_ms(msname):
     
 def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=0, 
                 num_apcal=1, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
-                flagdir=None, delete_allsky=False):
+                flagdir=None, delete_allsky=False, actively_rm_ms=True):
     
     try:
         msmd.open(msfile)
@@ -698,7 +699,11 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
                                         fast_vis=fast_vis, delete_allsky=delete_allsky,\
                                         fast_vis_image_model_subtraction=fast_vis_image_model_subtraction,\
                                         sky_image=sky_image)
+            if actively_rm_ms:
+                os.system('rm -rf ' + msfile)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
+            if actively_rm_ms:
+                os.system('rm -rf ' + outms)
             if os.path.exists(msfile.replace('.ms', '.badants')):
                 os.system('cp '+ msfile.replace('.ms', '.badants') + ' ' + flagdir + '/')
             msfile_slfcaled = visdir_slfcaled + '/' + os.path.basename(outms)
@@ -728,7 +733,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         return -1
 
 
-def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, stokes='I', beam_fit_size=2, briggs=-0.5):
+def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, stokes='I', beam_fit_size=2, briggs=-0.5,use_jpl_ephem=False):
     blc = int(512 - 128)
     trc = int(512 + 128 - 1)
     region='box [ [ {0:d}pix , {1:d}pix] , [{2:d}pix, {3:d}pix ] ]'.format(blc, blc, trc, trc)
@@ -755,26 +760,45 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         pb.srcjones(az=[az],el=[elev])
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         sclfactor = 1. / jones_matrices[0][0]
-        helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun') 
+        helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun')
+
+        if not os.path.exists(imagedir_allch):
+            os.makedirs(imagedir_allch)
+
+        logging.info('Imaging {0:s} with {1:s}'.format(msfile_slfcaled, helio_imagename))
+        
         default_wscleancmd = "wsclean -j 2 -mem 4 -quiet -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs " + str(briggs) + " -minuv-l 10 -auto-threshold 3 -name " + helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes
 
+        logging.info('nch_out: {0:d}'.format(nch_out))
         if nch_out>1:
             # default to be used for slow visibility imaging for fine channel imaging
             default_wscleancmd += " -join-channels -channels-out " + str(nch_out)
         
         cmd= shlex.split(default_wscleancmd + ' ' + msfile_slfcaled)
+
         wsclean_proc=subprocess.run(cmd)
+
 
         outfits = glob.glob(helio_imagename + '*-image.fits')
         outfits.sort()
+        
+        logging.info('Found {0:d} images'.format(len(outfits)))
         if len(outfits) > 0:
-            outfits_helio = hf.imreg(msfile_slfcaled, outfits, ephem=ephem, msinfo=msinfo, timerange=[tref_str] * len(outfits), 
+            if use_jpl_ephem:
+                outfits_helio = hf.imreg(msfile_slfcaled, outfits, ephem=ephem, msinfo=msinfo, timerange=[tref_str] * len(outfits), 
                     usephacenter=True, verbose=True, toTb=True, subregion=region, sclfactor=sclfactor)
+            else:
+                outfits_helio = []
+                for outfit in outfits:
+                    # single fits conversion
+                    outfits_helio.append(ocoords.fitsj2000tohelio(outfit, out_fits=None, toK=True, verbose=False, sclfactor=sclfactor, subregion=[blc, trc, blc, trc]))
+                #outfits_helio = ocoords.fitsj2000tohelio(outfits, out_fits=None, reftime="", toK=True, verbose=False, sclfactor=sclfactor)
             return outfits_helio
         else:
             logging.error('No fits images produced.')
             return -1
     except Exception as e:
+        print(e)
         logging.error(e)
         if wsclean_proc.poll() is None:
             wsclean_proc.terminate()
@@ -928,14 +952,14 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 
             min_nband=6, nch_out=12, beam_fit_size=2, briggs=-0.5, stokes='I', do_selfcal=True, num_phase_cal=0, num_apcal=1, 
             overwrite_ms=False, delete_ms_slfcaled=False, logger_file=None, compress_fits=True,
-            proc_dir = '/fast/solarpipe/realtime_pipeline/',
+            proc_dir_mem = '/dev/shm/srtmp/', proc_dir = '/fast/solarpipe/realtime_pipeline/',
             save_dir = '/lustre/solarpipe/realtime_pipeline/',
             calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables/',
             calib_file = '20240117_145752',
-            delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6,
+            delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6, save_selfcaltab=False,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
             bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
-            clear_old_files=True, clear_older_than=45):
+            clear_old_files=True, clear_older_than=45, actively_rm_ms=True):
     """
     Pipeline for processing and imaging slow visibility data
     :param time_start: start time of the visibility data to be processed
@@ -990,13 +1014,14 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     # caltable_folder is where the initial bandpass calibration tables are located 
     caltable_folder = calib_dir
     # gaintable_folder is where the intermediate gain tables are located
-    gaintable_folder = proc_dir + '/caltables/'
-    visdir_calib = proc_dir + '/slow_calib/'
-    visdir_work = proc_dir + '/' + slowfast + '_working/'
-    visdir_slfcaled = proc_dir + '/' + slowfast + '_slfcaled/'
+    gaintable_folder = proc_dir_mem + '/caltables/'
+    visdir_calib = proc_dir_mem + '/slow_calib/'
+    visdir_work = proc_dir_mem + '/' + slowfast + '_working/'
+    visdir_slfcaled = proc_dir_mem + '/' + slowfast + '_slfcaled/'
     imagedir_allch = proc_dir + '/'+ slowfast +'_images_allch/'
     flagdir = save_dir + '/flags/'
     refradir = save_dir + '/refra/'
+    caltabarchive = save_dir + '/caltablearchive/'
 
     imagedir_allch_combined = save_dir + '/fits/' + slowfast + '/'
     hdf_dir = save_dir + '/hdf/' + slowfast + '/'
@@ -1045,6 +1070,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
     if not os.path.exists(allsky_dir_figs):
         os.makedirs(allsky_dir_figs)
+
+    if not os.path.exists(caltabarchive):
+        os.makedirs(caltabarchive)
 
     if clear_old_files:
         remove_old_items(visdir_work, clear_older_than)
@@ -1116,6 +1144,29 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         prev_calfiles=glob.glob(os.path.join(gaintable_folder,"*.gcal"))#### these files will be deleted in this cycle
         prev_allsky_imgs = glob.glob(os.path.join(visdir_work,'*_allsky-image.fits'))
         
+                
+        if save_selfcaltab and slowfast.lower()=='slow':
+
+            if len(prev_calfiles) > 0:
+                logging.info('Saving gain tables to '+caltabarchive)
+                logging.info('prev_files : '+str(prev_calfiles))
+                for g in prev_calfiles:
+                    
+                    date_caltable = g.split('/')[-1].split('_')[0]
+                    time_caltable = g.split('/')[-1].split('_')[1]
+                    gaintables_sub = caltabarchive + '/' + date_caltable + '/' + date_caltable + "_" + time_caltable +'/'
+                    if not os.path.exists(gaintables_sub):
+                        os.makedirs(gaintables_sub)
+                
+                    os.system('cp -r ' + g + ' ' + gaintables_sub)
+            else:
+                logging.info('No gain tables found for {0:s}'.format(timestr))     
+        else:
+            logging.info('No gain tables saved for {0:s}'.format(timestr))
+            logging.info(str(save_selfcaltab)+ ' '+str(slowfast.lower()=='slow'))
+            print('<<',Time.now().isot,'>>','No gain tables saved for {0:s}'.format(timestr))
+
+
         msfiles_slfcaled = glob.glob(visdir_slfcaled + '/' + timestr + '_*MHz*.ms')
         msfiles_slfcaled.sort()
         if len(msfiles_slfcaled) == 0 or overwrite_ms:
@@ -1141,7 +1192,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             #result = pool.map_async(run_calib, msfiles)
             run_calib_partial = partial(run_calib, msfiles_cal=msfiles_cal, bcal_tables=bcal_tables, do_selfcal=do_selfcal, 
                     num_phase_cal=num_phase_cal, num_apcal=num_apcal, logger_file=logger_file, caltable_folder=gaintable_folder, 
-                    visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky)
+                    visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky, actively_rm_ms=actively_rm_ms)
 
             if slowfast.lower()=='slow':
                 timeout = 800.
@@ -1177,7 +1228,6 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     else:
                         logging.info('All sky image {0:s} does not exist.'.format(\
                                         visdir_work + '/' + timestr1 + '_' + freqstr + '*_allsky-image.fits'))
-
 
 
                 if delete_working_ms:
@@ -1427,7 +1477,8 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     etime = Time(trange['end']['m0']['value'], format='mjd')
     tref_mjd = (btime.mjd + etime.mjd) / 2. 
     tref = Time(tref_mjd, format='mjd')
-    ephem = hf.read_horizons(tref, dur=1./60./24., observatory='OVRO_MMA')
+    # ephem = hf.read_horizons(tref, dur=1./60./24., observatory='OVRO_MMA')
+    ephem=None
 
     run_imager_partial = partial(run_imager, imagedir_allch=imagedir_allch, ephem=ephem, \
                 nch_out=nch_out, stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
@@ -1606,7 +1657,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         server=None, lustre=True, file_path='slow', multinode=True, slurmmanaged=True, taskids='0123456789', delete_ms_slfcaled=True, slowfast='slow', 
         logger_dir = '/lustre/solarpipe/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
         #proc_dir = '/fast/solarpipe/realtime_pipeline/',
-        proc_dir = '/dev/shm/srtmp/',
+        proc_dir_mem = '/dev/shm/srtmp/', proc_dir = '/fast/solarpipe/realtime_pipeline/',
         proc_dir_isolation = True,
         save_dir = '/lustre/solarpipe/realtime_pipeline/',
         calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables/',
@@ -1615,11 +1666,13 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         briggs=-0.5,
         delete_working_ms=True, do_refra=True, delete_working_fits=True,
         do_imaging=True, delete_allsky=False, save_allsky=False,
+        save_selfcaltab=False,
         bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
         stop_at_sunset=True,
         do_daily_refracorr=True,
         slurm_kill_after_sunset=False,
-        clear_old_files=True, clear_older_than=30):
+        clear_old_files=True, clear_older_than=30, actively_rm_ms=True, 
+        use_jpl_ephem=False):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -1659,10 +1712,18 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
     if not os.path.exists(proc_dir):
         os.makedirs(proc_dir)
 
+    if not os.path.exists(proc_dir_mem):
+        os.makedirs(proc_dir_mem)
+
     if proc_dir_isolation:
         proc_dir = proc_dir + 'task_' + str(current_task_id) + '/'
+        proc_dir_mem = proc_dir_mem + 'task_' + str(current_task_id) + '/'
+
         if not os.path.exists(proc_dir):
             os.makedirs(proc_dir)
+        if not os.path.exists(proc_dir_mem):
+            os.makedirs(proc_dir_mem)
+    
 
     print('<<',Time.now().isot,'>>','Starting solar real-time pipeline')
     try:
@@ -1754,11 +1815,11 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
 
         res = pipeline_quick(time_start, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, 
                             server=server, lustre=lustre, file_path=file_path, slowfast=slowfast, delete_ms_slfcaled=delete_ms_slfcaled,
-                            logger_file=logger_file, proc_dir=proc_dir, save_dir=save_dir, calib_dir=calib_dir, 
+                            logger_file=logger_file, proc_dir=proc_dir,  proc_dir_mem=proc_dir_mem, save_dir=save_dir, calib_dir=calib_dir, 
                             calib_file=calib_file, delete_working_ms=delete_working_ms,
                             delete_working_fits=delete_working_fits, do_refra=do_refra,
                             beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky, save_allsky=save_allsky,
-                            clear_old_files=clear_old_files, clear_older_than=clear_older_than)
+                            clear_old_files=clear_old_files, clear_older_than=clear_older_than, save_selfcaltab=save_selfcaltab, actively_rm_ms=actively_rm_ms)
 
         time2 = timeit.default_timer()
         if res:
@@ -1849,7 +1910,8 @@ if __name__=='__main__':
     parser.add_argument('--server', default=None, help='Name of the server where the raw data is located. Must be defined in ~/.ssh/config.')
     parser.add_argument('--nolustre', default=False, help='If set, do NOT assume that the data are stored under /lustre/pipeline/ in the default tree', action='store_true')
     parser.add_argument('--file_path', default='slow/', help='Specify where the raw data is located')
-    parser.add_argument('--proc_dir', default='/dev/shm/srtmp/' )# default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
+    parser.add_argument('--proc_dir_mem', default='/dev/shm/srtmp/' )# default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
+    parser.add_argument('--proc_dir', default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
     parser.add_argument('--save_dir', default='/lustre/solarpipe/realtime_pipeline/', help='Directory for saving fits files')
     parser.add_argument('--calib_dir', default='/lustre/solarpipe/realtime_pipeline/caltables/', help='Directory to calibration tables')
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
@@ -1864,6 +1926,7 @@ if __name__=='__main__':
     parser.add_argument('--keep_working_ms', default=False, help='If True, keep the working ms files after imaging', action='store_true')
     parser.add_argument('--keep_working_fits', default=False, help='If True, keep the working fits files after imaging', action='store_true')
     parser.add_argument('--save_allsky', default=False, help='If True, save the band-averaged all sky images', action='store_true')
+    parser.add_argument('--save_selfcaltab', default=True, help='If True, save the selfcalibration tables', action='store_true')
     parser.add_argument('--no_selfcal', default=False, help='If set, do not do selfcal regardless slow or fast', action='store_true')
     parser.add_argument('--no_imaging', default=False, help='If set, do not perform imaging', action='store_true')
     parser.add_argument('--nonstop', default=False, help='If set, the script will be run without stopping', action='store_true')
@@ -1873,9 +1936,12 @@ if __name__=='__main__':
                     type=str, nargs='*', 
                     default=['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
                     help="Examples: --bands 32MHz 46MHz 64MHz")
+    parser.add_argument('--no_actively_rm_ms', default=False, help='If set, actively remove the measurement sets after imaging', action='store_true')
     parser.add_argument('--no_refracorr', default=False, help='If set, do not do daily refraction correction', action='store_true')
     parser.add_argument('--slurm_kill_after_sunset', default=False, help='If set, kill all the processes with scancel after sunset', action='store_true')
-    
+    parser.add_argument('--use_jpl_ephem', default=False, help='If set, use JPL ephemeris for refraction correction', action='store_true')
+
+
     args = parser.parse_args()
     sleep(int(args.sleep_time))
 
@@ -1901,13 +1967,14 @@ if __name__=='__main__':
 
     try:
         run_pipeline(time_start=args.start_time, time_end=Time(args.end_time), time_interval=float(args.interval), taskids=args.taskids, delay_from_now=float(args.delay),
-                     server=args.server, lustre=(not args.nolustre), file_path=args.file_path,
-                     proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
-                     altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
-                     do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
-                     delete_working_fits=(not args.keep_working_fits), save_allsky=args.save_allsky, beam_fit_size=args.bmfit_sz, briggs=args.briggs,
-                     do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop),
-                     do_daily_refracorr=(not args.no_refracorr), slurm_kill_after_sunset=args.slurm_kill_after_sunset)
+            server=args.server, lustre=(not args.nolustre), file_path=args.file_path,
+            proc_dir_mem=args.proc_dir_mem, proc_dir=args.proc_dir, save_dir=args.save_dir, calib_dir=args.calib_dir, calib_file=calib_file, 
+            altitude_limit=float(args.alt_limit), logger_dir = args.logger_dir, logger_prefix=args.logger_prefix, logger_level=int(args.logger_level), 
+            do_refra=args.do_refra, multinode= (not args.singlenode), delete_working_ms=(not args.keep_working_ms), 
+            delete_working_fits=(not args.keep_working_fits), save_allsky=args.save_allsky, beam_fit_size=args.bmfit_sz, briggs=args.briggs,
+            do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop),
+            do_daily_refracorr=(not args.no_refracorr), slurm_kill_after_sunset=args.slurm_kill_after_sunset, 
+            save_selfcaltab=args.save_selfcaltab, actively_rm_ms=(not args.no_actively_rm_ms), use_jpl_ephem=args.use_jpl_ephem)
     except Exception as e:
         logging.error(e)
         raise e
