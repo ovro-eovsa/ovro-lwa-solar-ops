@@ -8,6 +8,7 @@ signal(SIGPIPE,SIG_DFL)
 from ovrolwasolar import solar_pipeline as sp
 from ovrolwasolar.primary_beam import analytic_beam as beam
 from ovrolwasolar import utils, calibration, flagging
+from ovrolwasolar import leakage_correction as leakc
 from casatasks import clearcal, applycal, flagdata, tclean, exportfits, imsubimage, split
 from casatools import msmetadata, quanta, measures, table
 from suncasa.utils import helioimage2fits as hf
@@ -162,7 +163,7 @@ def check_fast_ms(msname):
     
 def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=0, 
                 num_apcal=1, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
-                flagdir=None, delete_allsky=False, actively_rm_ms=True):
+                flagdir=None, delete_allsky=False, actively_rm_ms=True, stokes='I'):
     
     try:
         msmd.open(msfile)
@@ -217,7 +218,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
                                         do_final_imaging=False, do_fluxscaling=False, freqbin=1, \
                                         fast_vis=fast_vis, delete_allsky=delete_allsky,\
                                         fast_vis_image_model_subtraction=fast_vis_image_model_subtraction,\
-                                        sky_image=sky_image)
+                                        sky_image=sky_image,pol=stokes)
             if actively_rm_ms:
                 os.system('rm -rf ' + msfile)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
@@ -278,7 +279,7 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         pb = beam(msfile_slfcaled)
         pb.srcjones(az=[az],el=[elev])
         jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
-        sclfactor = 1. / jones_matrices[0][0]
+        sclfactor = 1.# / jones_matrices[0][0]
         helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun')
 
         if not os.path.exists(imagedir_allch):
@@ -466,7 +467,139 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
             logging.error(e)
             logging.error('====Processing {0:s} failed'.format(fits_fch_lv10))
 
+def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/', \
+                                overwrite=True, slowfast='slow',\
+                                 leakage_database='/lustre/msurajit/leakage_database.db'):
+    """
+    Function for doing daily refraction corrections based on level 1 fits files produced in a given solar day
+    :param date: format 'yyyy-mm-dd' or an astropy.time.Time object or an astropy.time.Time compatible string
+    :param save_dir: directory to save the data prodcuts. Need to have a substructure of lev1/yyyy/mm/dd for level 1 files, and lev15/yyyy/mm/dd for level 1.5 files
+    :param overwrite: if True, overwrite the existing level 1.5 and refraction coefficient csv file
+    :param overbright: peak brightness temperature exceeding this value (in Kelvin) will be excluded for fitting
+    :param interp: interpolation method used by scipy.interpolation.interp1d. Default to 'linear'
+    :param max_dt: maximum time difference to perform the interpolation in seconds
+    """
+    if isinstance(date, str):
+        try:
+            date0 = Time(date)
+        except:
+            print('<<',Time.now().isot,'>>',"Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
+    elif isinstance(date, Time):
+        date0 = date
+    else:
+        print('<<',Time.now().isot,'>>',"Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
 
+    # define output directories
+    fits_dir = save_dir + '/fits/' + slowfast + '/'
+    fits_dir_lv10 = fits_dir + '/lev1/' 
+    fits_dir_lv15 = fits_dir + '/lev15/' 
+    
+    
+    
+    
+    fits_dir_lv20 = fits_dir + '/lev2/' 
+    fits_dir_lv25 = fits_dir + '/lev25/' 
+    
+    
+    hdf_dir = save_dir + '/hdf/' + slowfast + '/'
+    
+    hdf_dir_lv20 = hdf_dir + '/lev2/' 
+    hdf_dir_lv25 = hdf_dir + '/lev25/' 
+    
+    hdf_dir_lv10 = hdf_dir + '/lev1/' 
+    hdf_dir_lv15 = hdf_dir + '/lev15/' 
+    
+    
+    
+    print ("Inside the leakage correction function")
+    
+
+    # Note the following reorganization is only for synoptic plots and refraction csv files
+    # if UT time is before 3 UT, assign it to the earlier date. 
+    datestr_synop = date0.isot.split('T')[0].replace('-','')
+
+    datedir0 = date0.isot.split('T')[0].replace('-','/')+'/'
+    date1 = date0 + TimeDelta(1., format='jd')
+    datedir1 = date1.isot.split('T')[0].replace('-','/')+'/'
+    fits_fch0_lv10 = glob.glob(fits_dir_lv10 + datedir0 + '*fch*.fits')
+    fits_fch0_lv10.sort()
+    fits_fch1_lv10 = glob.glob(fits_dir_lv10 + datedir1 + '*fch*.fits')
+    fits_fch1_lv10.sort()
+    # narrow down to all files between 13 UT and 03 UT of the second day 
+    fits_fch_lv10_all_ = fits_fch0_lv10 + fits_fch1_lv10
+    fits_fch_lv10_all = []
+
+    
+    print (fits_fch_lv10_all_)
+    for f in fits_fch_lv10_all_:
+        datestr = os.path.basename(f).split('.')[2].split('T')[0]
+        timestr = os.path.basename(f).split('.')[2].split('T')[1][:-1]
+        datetimestr = datestr + 'T' + timestr[:2] + ':' + timestr[2:4] + ':' + timestr[4:]
+        if Time(datetimestr).mjd > Time(date0).mjd + 13./24.  and Time(datetimestr).mjd < Time(date1).mjd + 3./24.:
+            fits_fch_lv10_all.append(f)
+
+    fits_fch_lv10_all.sort()
+
+    
+
+    for fits_fch_lv10 in fits_fch_lv10_all:
+        fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
+        print('<<',Time.now().isot,'>>','processing fits '+fits_fch_lv10)
+        datestr = os.path.basename(fits_fch_lv10).split('.')[2].split('T')[0]
+        timestr = os.path.basename(fits_fch_lv10).split('.')[2].split('T')[1][:-1]
+        datetimestr = datestr + 'T' + timestr[:2] + ':' + timestr[2:4] + ':' + timestr[4:]
+        datedir = datestr.replace('-','/') + '/'
+        if not os.path.exists(fits_dir_lv25 + datedir):
+            os.makedirs(fits_dir_lv25 + datedir)
+        if not os.path.exists(hdf_dir_lv25 + datedir):
+            os.makedirs(hdf_dir_lv25 + datedir)
+        
+        if not os.path.exists(fits_dir_lv20 + datedir):
+            os.makedirs(fits_dir_lv20 + datedir)
+        if not os.path.exists(hdf_dir_lv20 + datedir):
+            os.makedirs(hdf_dir_lv20 + datedir)
+        
+        fits_mfs_lv15 = fits_dir_lv15 + datedir + os.path.basename(fits_mfs_lv10.replace('.lev1_mfs', '.lev1.5_mfs'))
+        fits_fch_lv15 = fits_dir_lv15 + datedir + os.path.basename(fits_fch_lv10.replace('.lev1_fch', '.lev1.5_fch'))
+
+        try:
+            fits_mfs_lv20 = fits_dir_lv20 + datedir + os.path.basename(fits_mfs_lv10.replace('.lev1_mfs', '.lev2_mfs'))
+            fits_fch_lv20 = fits_dir_lv20 + datedir + os.path.basename(fits_fch_lv10.replace('.lev1_fch', '.lev2_fch'))
+            
+            hdf_mfs_lv20 = hdf_dir_lv20 + datedir + os.path.basename(fits_mfs_lv20).replace('.fits', '.hdf')
+            hdf_fch_lv20 = hdf_dir_lv20 + datedir + os.path.basename(fits_fch_lv20).replace('.fits', '.hdf')
+            
+            fits_fch_lv20=leakc.do_leakage_correction(fits_fch_lv10,leakage_database,outfile=fits_fch_lv20)
+            fits_mfs_lv20=leakc.do_leakage_correction(fits_mfs_lv10,leakage_database, outfile=fits_mfs_lv20)
+            
+            utils.compress_fits_to_h5(fits_mfs_lv20, hdf_mfs_lv20)
+            utils.compress_fits_to_h5(fits_fch_lv20, hdf_fch_lv20)
+            
+            
+            
+            fits_mfs_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_mfs_lv10.replace('.lev1_mfs', '.lev2.5_mfs'))
+            fits_fch_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_fch_lv10.replace('.lev1_fch', '.lev2.5_fch'))
+            
+            hdf_mfs_lv15 = hdf_dir_lv15 + datedir + os.path.basename(fits_mfs_lv15).replace('.fits', '.hdf')
+            hdf_fch_lv15 = hdf_dir_lv15 + datedir + os.path.basename(fits_fch_lv15).replace('.fits', '.hdf')
+            
+            if os.path.isfile(fits_mfs_lv15):
+                fits_mfs_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_mfs_lv15.replace('.lev1.5_mfs', '.lev2.5_mfs'))
+                fits_fch_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_fch_lv15.replace('.lev1.5_fch', '.lev2.5_fch'))
+                
+                hdf_mfs_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_mfs_lv25).replace('.fits', '.hdf')
+                hdf_fch_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_fch_lv25).replace('.fits', '.hdf')
+                
+                leakc.do_leakage_correction(fits_mfs_lv15,leakage_database, outfile=fits_mfs_lv25)    
+                utils.compress_fits_to_h5(fits_mfs_lv25, hdf_mfs_lv25)
+                
+                leakc.do_leakage_correction(fits_fch_lv15,leakage_database, outfile=fits_fch_lv25)    
+                utils.compress_fits_to_h5(fits_fch_lv25, hdf_fch_lv25)
+                
+       
+        except Exception as e:
+            logging.error(e)
+            logging.error('====Processing {0:s} failed'.format(fits_fch_lv10))
 
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 
             min_nband=6, nch_out=12, beam_fit_size=2, briggs=-0.5, stokes='I', do_selfcal=True, num_phase_cal=0, num_apcal=1, 
@@ -478,7 +611,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6, save_selfcaltab=False,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
             bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
-            clear_old_files=True, clear_older_than=45, actively_rm_ms=True):
+            clear_old_files=True, clear_older_than=45, actively_rm_ms=True, leakage_database='/lustre/msurajit/leakage_database.db'):
     """
     Pipeline for processing and imaging slow visibility data
     :param time_start: start time of the visibility data to be processed
@@ -631,6 +764,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
 
         # check if the currently requested time has enough number of bands
+        min_nband=min(min_nband, len(bands))
         if len(msfiles0) < min(min_nband, len(bands)):
             #print('This time only has {0:d} subbands. Check nearby +-10s time.'.format(len(msfiles0)))
             #if slowfast.lower()=='slow':
@@ -711,7 +845,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             #result = pool.map_async(run_calib, msfiles)
             run_calib_partial = partial(run_calib, msfiles_cal=msfiles_cal, bcal_tables=bcal_tables, do_selfcal=do_selfcal, 
                     num_phase_cal=num_phase_cal, num_apcal=num_apcal, logger_file=logger_file, caltable_folder=gaintable_folder, 
-                    visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky, actively_rm_ms=actively_rm_ms)
+                    visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky, actively_rm_ms=actively_rm_ms,
+                    stokes=stokes)
 
             if slowfast.lower()=='slow':
                 timeout = 800.
@@ -880,13 +1015,26 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                         os.makedirs(fig_mfs_dir_sub_synop)
                     
                     fitsfiles.sort()
-                    allstokes_fits=combine_pol_images(fitsfiles,stokes) 
-                    utils.correct_primary_beam(allstokes_fits,pol=stokes)
+                    if stokes!='I':
+                        allstokes_fits=combine_pol_images(fitsfiles,stokes)
+                        for fitsimages in allstokes_fits: 
+                            utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
+                    else:
+                        allstokes_fits=fitsfiles
+                    
+                    
                     fits_images, plotted_image = compress_plot_images(allstokes_fits, btime, datedir, imagedir_allch_combined, hdf_dir, \
                                             fig_mfs_dir, stokes, fast_vis=fast_vis)
                     
+                    convert_to_hdf(fits_images[0],fits_images[1],datedir,hdf_dir, fast_vis=fast_vis)
+                    
                     logging.info("Level 1 images plotted ok")
                     figname_to_copy=None
+                    
+                    leak_frac=leakc.determine_multifreq_leakage(fits_images[0]) ### using only MFS images for now   
+                    leakc.write_to_database(fits_images[0],leak_frac,database=leakage_database)   
+                                  
+                    
                     
                     # Do refraction corrections
                     if not fast_vis:    
@@ -1017,32 +1165,68 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     return fitsfiles
 
 def combine_pol_images(fitsfiles,stokes):
+    num_freqs=len(fitsfiles)
+    freqs=[None]*num_freqs
+    
+    for i in range(num_freqs):
+        freqs[i]=utils.get_freqstr_from_name(fitsfiles[i][0])
+    
     pols=stokes.split(',')
-    multi_pol_fitsfiles=[]
-    stokes_order=''
     
-    stokes_images={}
-    for pol in pols:
-        stokes_images[pol]=[]
     
-    for img in fitsfiles:
-        pol=img.split('-')[-2]
-        stokes_images[pol].append(img)
+    
+    
+    
+    multi_freq_files=[None]*num_freqs
+    for freq_id,freq_files in enumerate(fitsfiles):
+        multi_pol_fitsfiles=[]
+        stokes_images={}
+        stokes_order=''
+        for pol in pols:
+            stokes_images[pol]=[]
+        for img in freq_files:
+            pol=img.split('-')[-2]
+            stokes_images[pol].append(img)
+            
+        if len(pols)!=1:
+            for j,pol in enumerate(pols):
+                files=stokes_images[pol]
+                files.sort()
+                multi_pol_fitsfiles.append(files)
+                stokes_order+=pol
+            stokes_order=','.join(stokes_order)
+            num_files=len(multi_pol_fitsfiles[0])
+            multi_pol_fitsfiles=np.array(multi_pol_fitsfiles)
+            fitsfiles_pol_combined=[None]*num_files
+            for j in range(num_files):
+                outfits=utils.combine_IQUV_images(multi_pol_fitsfiles[:,j].tolist(),stokes_order=stokes_order)
+                fitsfiles_pol_combined[j]=outfits
+        print (freq_id,num_freqs)
+        multi_freq_files[freq_id]=fitsfiles_pol_combined
         
-    if len(pols)!=1:
-        for j,pol in enumerate(pols):
-            files=stokes_images[pol]
-            files.sort()
-            multi_pol_fitsfiles.append(files)
-            stokes_order+=pol
-        stokes_order=','.join(stokes_order)
-        num_files=len(multi_pol_fitsfiles[0])
-        multi_pol_fitsfiles=np.array(multi_pol_fitsfiles)
-        fitsfiles_pol_combined=[None]*num_files
-        for j in range(num_files):
-            outfits=utils.combine_IQUV_images(multi_pol_fitsfiles[:,j].tolist(),stokes_order=stokes_order)
-            fitsfiles_pol_combined[j]=outfits
-    return fitsfiles_pol_combined
+    return multi_freq_files
+    
+def convert_to_hdf(fits_mfs, fits_fch, datedir,hdf_dir,fast_vis=False):
+    hdf_dir_sub_lv10 = hdf_dir + '/lev1/' + datedir
+    
+    if not os.path.exists(hdf_dir_sub_lv10):
+       os.makedirs(hdf_dir_sub_lv10)
+
+    hdf_mfs = hdf_dir_sub_lv10 + os.path.basename(fits_mfs).replace('.fits', '.hdf')
+    
+    if fast_vis:
+        utils.compress_fits_to_h5(fits_mfs, hdf_mfs, purge_corrupted=True)
+    else:
+        utils.compress_fits_to_h5(fits_mfs, hdf_mfs, purge_corrupted=False)    
+
+    hdf_fch = hdf_dir_sub_lv10 + os.path.basename(fits_fch).replace('.fits', '.hdf')
+    if fast_vis:
+        utils.compress_fits_to_h5(fits_fch, hdf_fch, purge_corrupted=True)
+    else:
+        utils.compress_fits_to_h5(fits_fch, hdf_fch, purge_corrupted=False)        
+
+    return       
+       
 
 def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined, \
                             hdf_dir, fig_mfs_dir, stokes, fast_vis=False):    
@@ -1058,13 +1242,12 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     
     btime=starttime
     imagedir_allch_combined_sub_lv10 = imagedir_allch_combined + '/lev1/' + datedir
-    hdf_dir_sub_lv10 = hdf_dir + '/lev1/' + datedir
+    
     fig_mfs_dir_sub_lv10 = fig_mfs_dir + '/lev1/' + datedir
 
     if not os.path.exists(imagedir_allch_combined_sub_lv10):
        os.makedirs(imagedir_allch_combined_sub_lv10)
-    if not os.path.exists(hdf_dir_sub_lv10):
-       os.makedirs(hdf_dir_sub_lv10)
+    
     
     if not os.path.exists(fig_mfs_dir_sub_lv10):
         os.makedirs(fig_mfs_dir_sub_lv10)
@@ -1073,7 +1256,8 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     timestr_iso = btime.isot[:-4].replace(':','')+'Z'
     
     # multi-frequency synthesis images
-    fits_mfs = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_mfs_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
+    fits_mfs = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_mfs_10s.' + \
+                timestr_iso + '.image_'+stokes.replace(',','')+'.fits' 
     #fitsfiles_mfs = glob.glob(imagedir_allch + '/' + timestr+ '*MFS-image.fits')
     fitsfiles_mfs = []
     for f in fitsfiles:
@@ -1091,15 +1275,12 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     
     ndfits.wrap(fitsfiles_mfs, outfitsfile=fits_mfs)
     
-    hdf_mfs = hdf_dir_sub_lv10 + os.path.basename(fits_mfs).replace('.fits', '.hdf')
-    if fast_vis:
-        utils.compress_fits_to_h5(fits_mfs, hdf_mfs, purge_corrupted=True)
-    else:
-        utils.compress_fits_to_h5(fits_mfs, hdf_mfs, purge_corrupted=False)
+    
     
     #if not fast_vis:
     # fine channel spectral images
-    fits_fch = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_fch_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
+    fits_fch = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_fch_10s.' + \
+                    timestr_iso + '.image_'+stokes.replace(',','')+'.fits' 
     fitsfiles_fch = []
     for f in fitsfiles:
         if type(f) is list:
@@ -1108,13 +1289,9 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
             continue
     fitsfiles_fch.sort()
     ndfits.wrap(fitsfiles_fch, outfitsfile=fits_fch)
-    hdf_fch = hdf_dir_sub_lv10 + os.path.basename(fits_fch).replace('.fits', '.hdf')
-    if fast_vis:
-        utils.compress_fits_to_h5(fits_fch, hdf_fch, purge_corrupted=True)
-    else:
-        utils.compress_fits_to_h5(fits_fch, hdf_fch, purge_corrupted=False)
     
-    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs)
+    
+    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs,apply_fiducial_primary_beam=True)
     figname_lv10 = os.path.basename(fits_mfs).replace('.fits', '.png')
     fig.savefig(fig_mfs_dir_sub_lv10 + '/' + figname_lv10)
     
@@ -1224,7 +1401,9 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         do_daily_refracorr=True,
         slurm_kill_after_sunset=False,
         clear_old_files=True, clear_older_than=30, actively_rm_ms=True, 
-        use_jpl_ephem=False):
+        use_jpl_ephem=False,
+        stokes='I',
+        leakage_database='/lustre/msurajit/leakage_database.db'):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -1344,6 +1523,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             #loop_count=0 
         
         if time_end:
+            
             if time_start > Time(time_end):
                 logging.info('The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
                 print('<<',Time.now().isot,'>>','The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
@@ -1371,7 +1551,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                             calib_file=calib_file, delete_working_ms=delete_working_ms,
                             delete_working_fits=delete_working_fits, do_refra=do_refra,
                             beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky, save_allsky=save_allsky,
-                            clear_old_files=clear_old_files, clear_older_than=clear_older_than, save_selfcaltab=save_selfcaltab, actively_rm_ms=actively_rm_ms)
+                            clear_old_files=clear_old_files, clear_older_than=clear_older_than, save_selfcaltab=save_selfcaltab, actively_rm_ms=actively_rm_ms, stokes=stokes)
 
         time2 = timeit.default_timer()
         if res:
@@ -1384,7 +1564,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
 
         time_start += TimeDelta(time_interval, format='sec')
 
-        if time_start > t_set:
+        if time_start > Time('2024-04-14T20:05:30'):#t_set:
             (t_rise_next, t_set_next) = sun_riseset(t_set + TimeDelta(6./24., format='jd'))
             date_mjd = int(time_start.mjd)
             if time_start.mjd - date_mjd < 4./24.:
@@ -1402,7 +1582,10 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 else:
                     twait = t_rise_next - Time.now() 
                     logging.info('{0:s}: Sun is setting. Done for the day. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
-
+            if stokes=='I,Q,U,V':
+                print ("Doing leakage correction")
+                daily_leakage_correction(date_synop,save_dir=save_dir,overwrite=False, leakage_database=leakage_database)
+                
             if slowfast.lower() == 'fast':
                 twait += TimeDelta(600., format='sec') 
 
@@ -1492,7 +1675,7 @@ if __name__=='__main__':
     parser.add_argument('--no_refracorr', default=False, help='If set, do not do daily refraction correction', action='store_true')
     parser.add_argument('--slurm_kill_after_sunset', default=False, help='If set, kill all the processes with scancel after sunset', action='store_true')
     parser.add_argument('--use_jpl_ephem', default=False, help='If set, use JPL ephemeris for refraction correction', action='store_true')
-
+    parser.add_argument('--stokes', default='I', help='Which Stokes to process')
 
     args = parser.parse_args()
     sleep(int(args.sleep_time))
@@ -1526,7 +1709,7 @@ if __name__=='__main__':
             delete_working_fits=(not args.keep_working_fits), save_allsky=args.save_allsky, beam_fit_size=args.bmfit_sz, briggs=args.briggs,
             do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop),
             do_daily_refracorr=(not args.no_refracorr), slurm_kill_after_sunset=args.slurm_kill_after_sunset, 
-            save_selfcaltab=args.save_selfcaltab, actively_rm_ms=(not args.no_actively_rm_ms), use_jpl_ephem=args.use_jpl_ephem)
+            save_selfcaltab=args.save_selfcaltab, actively_rm_ms=(not args.no_actively_rm_ms), use_jpl_ephem=args.use_jpl_ephem, stokes=args.stokes)
     except Exception as e:
         logging.error(e)
         raise e
