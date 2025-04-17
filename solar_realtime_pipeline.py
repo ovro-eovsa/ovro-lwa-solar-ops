@@ -1201,7 +1201,7 @@ def combine_pol_images(fitsfiles,stokes):
             for j in range(num_files):
                 outfits=utils.combine_IQUV_images(multi_pol_fitsfiles[:,j].tolist(),stokes_order=stokes_order)
                 fitsfiles_pol_combined[j]=outfits
-        print (freq_id,num_freqs)
+        
         multi_freq_files[freq_id]=fitsfiles_pol_combined
         
     return multi_freq_files
@@ -1563,14 +1563,20 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             logging.info('{0:s}: Warning!! Processing {1:s} took {2:.1f}m to complete. This node may be falling behind'.format(socket.gethostname(), time_start.isot, (time2-time1)/60.))
 
         time_start += TimeDelta(time_interval, format='sec')
-
-        if time_start > Time('2024-04-14T20:05:30'):#t_set:
+        
+        date_mjd = int(time_start.mjd)
+        if time_start.mjd - date_mjd < 4./24.:
+            date_synop = Time(time_start.mjd - 1., format='mjd').isot[:10]
+        else:
+            date_synop = Time(time_start.mjd, format='mjd').isot[:10]
+                
+        if stokes=='I,Q,U,V':
+            print ("Doing leakage correction")
+            daily_leakage_correction(date_synop,save_dir=save_dir,overwrite=False, leakage_database=leakage_database)
+                
+        if time_start > t_set:
             (t_rise_next, t_set_next) = sun_riseset(t_set + TimeDelta(6./24., format='jd'))
-            date_mjd = int(time_start.mjd)
-            if time_start.mjd - date_mjd < 4./24.:
-                date_synop = Time(time_start.mjd - 1., format='mjd').isot[:10]
-            else:
-                date_synop = Time(time_start.mjd, format='mjd').isot[:10]
+            
             
             # use last "worker" for daily refraction correction
             if do_daily_refracorr:
