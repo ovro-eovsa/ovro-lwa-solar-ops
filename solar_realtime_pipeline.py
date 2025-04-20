@@ -576,6 +576,7 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
             hdf_mfs_lv20 = hdf_dir_lv20 + datedir + os.path.basename(fits_mfs_lv20).replace('.fits', '.hdf')
             hdf_fch_lv20 = hdf_dir_lv20 + datedir + os.path.basename(fits_fch_lv20).replace('.fits', '.hdf')
             
+            
             fits_fch_lv20=leakc.do_leakage_correction(fits_fch_lv10,leakage_database,outfile=fits_fch_lv20)
             fits_mfs_lv20=leakc.do_leakage_correction(fits_mfs_lv10,leakage_database, outfile=fits_mfs_lv20)
             
@@ -597,10 +598,10 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
                 hdf_mfs_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_mfs_lv25).replace('.fits', '.hdf')
                 hdf_fch_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_fch_lv25).replace('.fits', '.hdf')
                 
-                leakc.do_leakage_correction(fits_mfs_lv15,leakage_database, outfile=fits_mfs_lv25)    
+                fits_mfs_lv25=leakc.do_leakage_correction(fits_mfs_lv15,leakage_database, outfile=fits_mfs_lv25)    
                 #utils.compress_fits_to_h5(fits_mfs_lv25, hdf_mfs_lv25)
                 
-                leakc.do_leakage_correction(fits_fch_lv15,leakage_database, outfile=fits_fch_lv25)    
+                fits_fch_lv25=leakc.do_leakage_correction(fits_fch_lv15,leakage_database, outfile=fits_fch_lv25)    
                 #utils.compress_fits_to_h5(fits_fch_lv25, hdf_fch_lv25)
                 
        
@@ -651,7 +652,7 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
     
     
     
-    print ("Correcting for the self-terms of the primary beam")
+    logging.info("Correcting for the self-terms of the primary beam")
     
 
     # Note the following reorganization is only for synoptic plots and refraction csv files
@@ -699,8 +700,13 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
                 for img in fits_lv_all:
                     try:
                         correct_primary_beam_self_terms(img,pol=stokes)
-                        hdf_file=os.path.join(hdf_dir1,os.path.basename(img).replace('.fits','.hdf'))
+                        with fits.open(img) as hdu:
+                            datetimestr=hdu[0].header['DATE-OBS']
+                            datedir_path=(Time(datetimestr).datetime).strftime("%Y/%m/%d/")
+                        hdf_file=os.path.join(hdf_dir1,datedir_path,os.path.basename(img).replace('.fits','.hdf'))
+                        print (img,hdf_file)
                         utils.compress_fits_to_h5(img, hdf_file)
+                        print ("--------------hdf5 file written-------------------")
                    
                     except Exception as e:
                         logging.error(e)
@@ -732,6 +738,18 @@ def correct_primary_beam_self_terms(imagename, pol='I'):
     meta, data = ndfits.read(imagename)
     meta_header=meta['header']
     
+    head=fits.getheader(imagename)
+    key_list=[]
+    keys=head.keys()
+    for key in keys:
+        key_list.append(key)
+    
+    if 'BEAMCOR' in key_list:
+        logging.debug("Image already has been corrected for self-terms")
+        print ("Image already has been corrected for self-terms")
+        return
+    
+    
     shape=data.shape
     num_stokes=shape[0]
     num_freqs=shape[1]
@@ -741,7 +759,7 @@ def correct_primary_beam_self_terms(imagename, pol='I'):
     az,alt=utils.get_solar_altaz_multiple_times(obstime)
     
     
-    freqs_db=np.arange(30,89,5)
+    freqs_db=np.arange(29,90,4) ### The highest frequency calculated with this range is 89
     scale_db=np.zeros((4,freqs_db.size))
 
     for freq_db_ind,freq1 in enumerate(freqs_db):
@@ -756,29 +774,39 @@ def correct_primary_beam_self_terms(imagename, pol='I'):
             scale_db[stokes_ind,freq_db_ind]=muller_matrix[stokes_ind,stokes_ind].real
         
     
-   
+    frequency=meta['ref_cfreqs']*1e-6
+    muller_matrix_order={'I':0,'Q':1,'U':2,'V':3}
     
-    for freq_ind in range(num_freqs):
-        frequency=meta['ref_cfreqs'][freq_ind]*1e-6
+    cols=[]
+    if pol=='I':
+        scale=np.expand_dims(np.interp(frequency,freqs_db,scale_db[0,:]),axis=(1,2))
+        data[0,...]=data[0,...]/scale
+        beam_self=scale.squeeze()
+        fitscol=fits.Column(name=pol+"_self",format='E',array=beam_self)  
+                    ## E stands for single precision float (32-bit). Change to D for double precision
+                    ## see https://docs.astropy.org/en/stable/io/fits/usage/table.html#column-creation
+        cols.append(fitscol)
+    else:
+        stokes_order=meta_header['polorder']
+        pols=stokes_order.split(',')
+        beam_self=np.zeros(frequency.size)
+        for j,pol in enumerate(pols):
+            muller_matrix_index=muller_matrix_order[pol]
+            scale=np.expand_dims(np.interp(frequency,freqs_db,scale_db[muller_matrix_index,:]),axis=(1,2))
+            data[j,...]=data[j,...]/scale
+            beam_self[:]=scale.squeeze()
+            print (pol+"_self")
+            fitscol=fits.Column(name=pol+"_self",format='E',array=beam_self)  
+                    ## E stands for single precision float (32-bit). Change to D for double precision
+                    ## see https://docs.astropy.org/en/stable/io/fits/usage/table.html#column-creation
+            cols.append(fitscol)
+    
+    header={}
+    header['beamcor']=True
+            
         
-        if pol=='I':
-            scale=np.interp(frequency,freqs_db,scale_db[0,:])
-            logging.debug('The Stokes I beam correction factor for ' + str(round(frequency,2))+"MHz:" + str(round(scale, 4)))
-            data[0,...]/=scale
-
-
-        else:
-            muller_matrix_order={'I':0,'Q':1,'U':2,'V':3}
-            stokes_order=meta_header['polorder']
-            pols=stokes_order.split(',')
-            for j,pol in enumerate(pols):
-                muller_matrix_index=muller_matrix_order[pol]
-                scale=np.interp(frequency,freqs_db,scale_db[muller_matrix_index,:])                                
-                logging.debug('The Stokes '+pol+' beam correction factor for ' + str(round(frequency,2))+"MHz:" + str(round(scale, 4)))
-                print ('The Stokes '+pol+' beam correction factor for ' + str(round(frequency,2))+"MHz:" + str(round(scale, 4)))
-                data[j,...]=data[j,...]/scale
-        
-    ndfits.update(imagename,new_data=data)
+    ndfits.update(imagename,new_data=data,new_columns=cols, new_header_entries=header)
+    print ("data and headers updated")
         
 
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 

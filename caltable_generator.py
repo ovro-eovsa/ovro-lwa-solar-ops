@@ -9,6 +9,7 @@ from ovrolwasolar import utils,flagging
 from casatools import msmetadata
 from casatasks import applycal
 from ovrolwasolar import beam_polcalib,utils
+from ovrolwasolar.beam_polcalib import image_polcal_astronomical_source as img_polcal
 
 
 def source_riseset(skycoord, date_time,observatory='ovro', altitude_limit=15):
@@ -380,13 +381,15 @@ def apply_crosshand_phase_on_caltables(caltables,crosshand_phase,crosshand_freqs
     crosshand_applied=[None]*len(caltables)
     
     for j,caltable in enumerate(caltables):
-    if not inplace:
-        copied_caltable=caltable+".crosshand"
-        crosshand_applied[j]=copied_caltable
-        os.system("cp "+caltable+" "+copied_caltable)
-        beam_polcalib.combine_crosshand_theta_on_caltable(copied_caltable,crosshand_phase,crosshand_freqs)
+        if not inplace:
+            copied_caltable=caltable+".crosshand"
+            crosshand_applied[j]=copied_caltable
+            os.system("cp "+caltable+" "+copied_caltable)
+        else:
+            crosshand_applied[j]=caltable
+        beam_polcalib.combine_crosshand_theta_on_caltable(crosshand_applied[j],crosshand_phase,crosshand_freqs)
     
-    return           
+    return  crosshand_applied         
         
 def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
                      bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \

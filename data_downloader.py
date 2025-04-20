@@ -1,11 +1,13 @@
 import os
-from astropy.time import Time
+from astropy.time import Time,TimeDelta
 import shlex, subprocess
 from time import sleep
 import socket,glob
 import logging
 import timeit
 from ovrolwasolar import flagging
+import numpy as np
+
 
 
 def list_msfiles(intime, lustre=True, file_path='slow', server=None, time_interval='10s', 
