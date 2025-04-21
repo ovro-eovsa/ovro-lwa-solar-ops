@@ -350,7 +350,7 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
     :type freq_avg: int
     '''
     dynamic_spectrum,freqs,tim_mjds=get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir=proc_dir,\
-                                    caltable_folder=caltable_folder,model_beam_file=model_beam_file)
+                                    caltable_folder=caltable_folder,model_beam_file=model_beam_file, freq_avg=freq_avg)
     
     img_pol=img_polcal(dynamic_spectrum=dynamic_spectrum,\
                     freqs=freqs,\
@@ -394,8 +394,8 @@ def apply_crosshand_phase_on_caltables(caltables,crosshand_phase,crosshand_freqs
 def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
                      bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
                     '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
-                    '78MHz', '82MHz'],caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_latest'
-                    ):
+                    '78MHz', '82MHz'],caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_latest',\
+                    freq_avg=16):
     '''
     This function will produce the dynamic spectrum of the source. It will also do this
     after flagging outrigger. Then it will phase up to the sky_coord supplied. Then it
