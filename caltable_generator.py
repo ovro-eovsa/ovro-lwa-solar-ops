@@ -5,7 +5,7 @@ import astropy.units as u
 import sys,os,glob,logging
 import data_downloader
 from casatools import table
-from ovrolwasolar import utils,flagging
+from ovrolwasolar import utils,flagging,calibration
 from casatools import msmetadata
 from casatasks import applycal
 from ovrolwasolar import beam_polcalib,utils
@@ -72,6 +72,7 @@ def flag_ms(msfiles):
 
 def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger=True, 
         proc_dir='./',doplot=True):
+    
     """
     Function to generate calibration tables for a list of calibration ms files
     :param calib_in: input used for calibration. This can be either a) a string of time stamp recognized by astropy.time.Time 
@@ -86,6 +87,9 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
     done in the beamformer itself. I am removing that part of the code on April 4, 2025.
     """
     import pandas as pd
+    
+    msmd=msmetadata()
+    
     download_fold = proc_dir + '/ms_calib/'
     caltable_fold = proc_dir + '/caltables/'
     beam_caltable_fold = proc_dir + '/caltables_beam/'
@@ -130,7 +134,6 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
         flag_ms(ms_calib)
         
         for ms_calib_ in ms_calib:
-            flagging.flag_bad_ants(ms_calib)
             try:
                 bcaltb = calibration.gen_calibration(ms_calib_, uvrange=uvrange, caltable_fold=caltable_fold, refant=refant)
                 msmd.open(ms_calib_)
