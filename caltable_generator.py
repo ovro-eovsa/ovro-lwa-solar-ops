@@ -220,6 +220,7 @@ def find_delay_all_ant_corr(freqs,phase):
     return delay
     
 def create_waterfall_plot(caltables,msnames,figname=None,num_chan=192,num_ant=352):
+    import matplotlib.pyplot as plt
     
     bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
             '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
