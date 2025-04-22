@@ -70,7 +70,7 @@ def flag_ms(msfiles):
             logging.error(exc_type, fname, exc_tb.tb_lineno)
     return
 
-def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger=True, 
+def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger_antenna=True, 
         proc_dir='./',doplot=True):
     
     """
@@ -80,7 +80,7 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
     :param bcaltb: name of the calibration tables. Use the default if None
     :param uvrange: uv range to be used, default to '>10lambda'
     :param refant: reference antenna, default to '202'
-    :param flag_outrigger: if True, flag all outrigger antennas. These would be used for beamforming.
+    :param flag_outrigger_antenna: if True, flag all outrigger antennas. These would be used for beamforming.
     :proc_dir: directory to process the data and hold output files.
     
     In the early days we were generating a normalising factor for each channel. Now the normalization is being
@@ -152,7 +152,7 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
         return -1
         
 
-    if flag_outrigger:
+    if flag_outrigger_antenna:
         bcaltbs_bm = []
         for bcaltb in bcaltbs:
             bcaltb_bm = beam_caltable_fold + '/' + os.path.basename(bcaltb)
