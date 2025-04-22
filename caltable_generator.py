@@ -110,7 +110,7 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
         except:
             print('<<',Time.now().isot,'>>','The input time needs to be astropy.time.Time format. Abort...')
             return -1
-        ms_calib = data_downloader.download_calibms(calib_time, doflag=True, download_fold=download_fold)
+        ms_calib = data_downloader.download_calibms(calib_time, download_fold=download_fold)
     else:
         print('<<',Time.now().isot,'>>','Input not recognized. Abort...')
         return -1
@@ -130,6 +130,7 @@ def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag
         flag_ms(ms_calib)
         
         for ms_calib_ in ms_calib:
+            flagging.flag_bad_ants(ms_calib)
             try:
                 bcaltb = calibration.gen_calibration(ms_calib_, uvrange=uvrange, caltable_fold=caltable_fold, refant=refant)
                 msmd.open(ms_calib_)
