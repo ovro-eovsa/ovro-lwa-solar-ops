@@ -445,16 +445,17 @@ def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
         os.makedirs(download_fold)
     
     while st.mjd<=end_mjd:
-        msfiles=data_downloader.download_calibms(st,download_fold=download_fold)#glob.glob(download_fold+"/*.ms")#
+        msfiles=data_downloader.download_calibms(st,download_fold=download_fold)
         flag_ms(msfiles)
         
         if len(msfiles)==num_bands:
-            stokes_data,freqs=get_source_spectrum_single_time(msfiles,sky_coord)
+            stokes_data,freqs=get_source_spectrum_single_time(msfiles,sky_coord,caltable_folder=caltable_folder)
         else:
-            stokes_data,_=get_source_spectrum_single_time(msfiles,sky_coord)
+            stokes_data,_=get_source_spectrum_single_time(msfiles,sky_coord,caltable_folder=caltable_folder)
         dynamic_spectrum.append(stokes_data)
         mjds.append(st.mjd)
         st+=tdt
+        
     
     concat_ds=np.array(dynamic_spectrum)
     concat_ds=np.swapaxes(np.swapaxes(concat_ds,0,1),1,2)
@@ -540,6 +541,7 @@ def get_source_spectrum_single_time(msfiles,sky_coord,caltable_folder='/lustre/s
             freqs[k*num_chan:(k+1)*num_chan]=np.nan
             continue
         else:    
+            
             applycal(msname,gaintable=caltables[0])
             stokes_data[:,k*num_chan:(k+1)*num_chan]=get_IQUV(msname,sky_coord)                                                            
             freqs[k*num_chan:(k+1)*num_chan]=utils.get_caltable_freq(msname)*1e-6 #### converting to MHz

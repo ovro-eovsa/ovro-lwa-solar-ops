@@ -8,8 +8,8 @@ sys.path.append('/data07/msurajit/ovro-lwa-solar-ops2/')
 import caltable_generator
 
 cygA_coord='19h59m28.35663s +40d44m02.0970s'
-starttime='2025-04-17T12:00:00'
-endtime='2025-04-17T17:00:00'
+starttime='2025-04-17T13:00:00'
+endtime='2025-04-17T13:10:00'
 tdt=900  ### in seconds
 caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_latest' ### ensure that there is one caltable for frequency band in this folder
 
