@@ -3,6 +3,7 @@ import os, sys, glob, getopt
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
 from signal import signal, SIGPIPE, SIG_DFL
 signal(SIGPIPE,SIG_DFL)
 from ovrolwasolar import solar_pipeline as sp
@@ -641,8 +642,8 @@ def check_fast_ms(msname):
     return True
 
     
-def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=0, 
-                num_apcal=1, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
+def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=1, 
+                num_apcal=0, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
                 flagdir=None, delete_allsky=False, actively_rm_ms=True):
     
     try:
@@ -698,7 +699,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
                                         do_final_imaging=False, do_fluxscaling=False, freqbin=1, \
                                         fast_vis=fast_vis, delete_allsky=delete_allsky,\
                                         fast_vis_image_model_subtraction=fast_vis_image_model_subtraction,\
-                                        sky_image=sky_image)
+                                        sky_image=sky_image, use_selfcal_img_to_subtract=True)
             if actively_rm_ms:
                 os.system('rm -rf ' + msfile)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
@@ -721,7 +722,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
             outms, tmp = sp.image_ms_quick(msfile, calib_ms=msfile_cal, do_selfcal=do_selfcal, imagename=imagename, logging_level='info', 
                         num_phase_cal=num_phase_cal, num_apcal=num_apcal,
                         logfile=logger_file, caltable_folder=caltable_folder, do_final_imaging=False, 
-                        do_fluxscaling=False, freqbin=1, delete_allsky=delete_allsky)
+                        do_fluxscaling=False, freqbin=1, delete_allsky=delete_allsky, use_selfcal_img_to_subtract=True)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
             msfile_slfcaled = visdir_slfcaled + '/' + os.path.basename(outms)
             return msfile_slfcaled
@@ -950,11 +951,11 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
 
 
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 
-            min_nband=6, nch_out=12, beam_fit_size=2, briggs=-0.5, stokes='I', do_selfcal=True, num_phase_cal=0, num_apcal=1, 
+            min_nband=6, nch_out=12, beam_fit_size=2, briggs=-0.5, stokes='I', do_selfcal=True, num_phase_cal=1, num_apcal=0, 
             overwrite_ms=False, delete_ms_slfcaled=False, logger_file=None, compress_fits=True,
             proc_dir_mem = '/dev/shm/srtmp/', proc_dir = '/fast/solarpipe/realtime_pipeline/',
             save_dir = '/lustre/solarpipe/realtime_pipeline/',
-            calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables/',
+            calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables_latest/',
             calib_file = '20240117_145752',
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6, save_selfcaltab=False,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
@@ -1037,6 +1038,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
     bcal_tables = glob.glob(caltable_folder + calib_file + '_*MHz.bcal')
     bcal_tables.sort()
+
+    logging.debug('Found {0:d} bandpass calibration tables with {1:s}'.format(len(bcal_tables), calib_file))
 
     if not os.path.exists(visdir_work):
         os.makedirs(visdir_work)
@@ -1187,6 +1190,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             
             # parallelized calibration, selfcalibration, and source subtraction
             logging.debug('Starting to calibrate all {0:d} bands'.format(len(msfiles)))
+            logging.debug('Num of bcal {0:d} bands'.format(len(bcal_tables)))
+
             time_cal1 = timeit.default_timer()
 
             #result = pool.map_async(run_calib, msfiles)
@@ -1653,14 +1658,14 @@ def remove_old_items(directory=".", minutes=45):
                 pass
         
 
-def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay_from_now=180., do_selfcal=True, num_phase_cal=0, num_apcal=1, 
+def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay_from_now=180., do_selfcal=True, num_phase_cal=1, num_apcal=0, 
         server=None, lustre=True, file_path='slow', multinode=True, slurmmanaged=True, taskids='0123456789', delete_ms_slfcaled=True, slowfast='slow', 
         logger_dir = '/lustre/solarpipe/realtime_pipeline/logs/', logger_prefix='solar_realtime_pipeline', logger_level=20,
         #proc_dir = '/fast/solarpipe/realtime_pipeline/',
         proc_dir_mem = '/dev/shm/srtmp/', proc_dir = '/fast/solarpipe/realtime_pipeline/',
         proc_dir_isolation = True,
         save_dir = '/lustre/solarpipe/realtime_pipeline/',
-        calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables/',
+        calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables_latest/',
         calib_file = '20240117_145752', altitude_limit=10., 
         beam_fit_size = 2,
         briggs=-0.5,
@@ -1913,7 +1918,7 @@ if __name__=='__main__':
     parser.add_argument('--proc_dir_mem', default='/dev/shm/srtmp/' )# default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
     parser.add_argument('--proc_dir', default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
     parser.add_argument('--save_dir', default='/lustre/solarpipe/realtime_pipeline/', help='Directory for saving fits files')
-    parser.add_argument('--calib_dir', default='/lustre/solarpipe/realtime_pipeline/caltables/', help='Directory to calibration tables')
+    parser.add_argument('--calib_dir', default='/lustre/solarpipe/realtime_pipeline/caltables_latest/', help='Directory to calibration tables')
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
     parser.add_argument('--alt_limit', default=15., help='Lowest solar altitude to start/end imaging')
     parser.add_argument('--bmfit_sz', default=2, help='Beam fitting size to be passed to wsclean')
@@ -1959,11 +1964,14 @@ if __name__=='__main__':
         logging.info('Calibration tables not provided or recognized. Attempting to find those from default location on lwacalim.')
         calib_tables = glob.glob('/lustre/solarpipe/realtime_pipeline/caltables_latest/*.bcal')
         if len(calib_tables) > 10:
-            calib_file = os.path.basename(calib_tables[0])[:15]
+            calib_file = '_'.join(os.path.basename(calib_tables[0]).split('_')[0:-1])
             logging.info('Using calibration file {0:s}'.format(calib_file))
         else:
             logging.error('No calibration files found. Abort.')
             sys.exit(0)
+
+    logging.info('Calibration file to be used: {0:s}'.format(calib_file))
+    print('Calibration file to be used: {0:s}'.format(calib_file))
 
     try:
         run_pipeline(time_start=args.start_time, time_end=Time(args.end_time), time_interval=float(args.interval), taskids=args.taskids, delay_from_now=float(args.delay),
