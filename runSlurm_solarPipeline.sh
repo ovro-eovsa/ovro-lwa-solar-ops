@@ -2,10 +2,10 @@
 #SBATCH --job-name=solarpipedaily
 #SBATCH --partition=solar
 #SBATCH --ntasks=10
-#SBATCH --cpus-per-task=20
+#SBATCH --cpus-per-task=16
 #SBATCH --distribution=cyclic
 #SBATCH --nodelist=lwacalim[05-09]
-#SBATCH --mem=190G
+#SBATCH --mem=160G
 #SBATCH --time=16:00:00
 #SBATCH --output=/lustre/solarpipe/slurmlog/%j.out
 #SBATCH --error=/lustre/solarpipe/slurmlog/%j.err
@@ -21,6 +21,7 @@ DIR_PY_ENV=/opt/devel/peijin/solarenv    #/opt/devel/bin.chen/envs/suncasa/
 CLEAR_CACHE_BEFORE_RUN=True
 
 source /home/solarpipe/.bashrc
+conda activate
 conda activate $DIR_PY_ENV
 
 # add DIRSOFT to the python path
