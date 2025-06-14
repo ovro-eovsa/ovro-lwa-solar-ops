@@ -6,12 +6,14 @@ os.environ["OMP_NUM_THREADS"] = "1"
 from signal import signal, SIGPIPE, SIG_DFL
 signal(SIGPIPE,SIG_DFL)
 from ovrolwasolar import solar_pipeline as sp
-from ovrolwasolar.primary_beam import analytic_beam as beam
+from ovrolwasolar.primary_beam import jones_beam as beam
 from ovrolwasolar import utils, calibration, flagging
+from ovrolwasolar import leakage_correction as leakc
 from casatasks import clearcal, applycal, flagdata, tclean, exportfits, imsubimage, split
 from casatools import msmetadata, quanta, measures, table
 from suncasa.utils import helioimage2fits as hf
 from suncasa.io import ndfits
+from astropy.io import fits
 from ovrolwasolar import file_handler
 import logging
 import timeit
@@ -40,6 +42,9 @@ import platform
 from ovrolwasolar import visualization as ovis
 from ovrolwasolar import refraction_correction as orefr
 from ovrolwasolar import coords as ocoords
+
+import data_downloader
+
 
 #import gc # garbage collection
 #gc.enable()
@@ -70,53 +75,7 @@ def set_memory_limit(percentage=0.1):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     resource.setrlimit(resource.RLIMIT_AS, (int(get_memory() * 1024 * percentage), hard))
 
-def source_riseset(skycoord, date_time,observatory='ovro', altitude_limit=15):
-    '''
-    :param date_time: input time in astropy.time.Time format
-    :param observatory: name of the observatory recognized by astropy
-    :param altitude_limit: lower limit of altitude to consider. Default to 15 degrees.
-    :param skycoord: Source can be provided by using a astropy skycoordinate. 
-                     
-    :return trise, tset  ## has 30 min resolution
-    '''
-    try:
-        date_mjd = Time(date_time).mjd
-    except Exception as e:
-        logging.error(e)
 
-    obs = EarthLocation.of_site(observatory)
-    t0 = Time(int(date_mjd), format='mjd')
-    source_rise=t0
-    
-
-    alt = skycoord.transform_to(AltAz(obstime=t0, location=obs)).alt.degree
-
-    source_risen=False
-    if alt>altitude_limit:
-        source_risen=True
-
-    if not source_risen:    
-        while alt < altitude_limit:
-            source_rise += TimeDelta(1800., format='sec')
-            alt = skycoord.transform_to(AltAz(obstime=source_rise, location=obs)).alt.degree
-            
-        source_set=source_rise+TimeDelta(1800., format='sec')
-        while alt > altitude_limit:
-            source_set += TimeDelta(1800., format='sec')
-            alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
-        return source_rise,source_set
-    else:
-        while alt > altitude_limit:
-            source_rise -= TimeDelta(1800., format='sec')
-            alt = skycoord.transform_to(AltAz(obstime=source_rise, location=obs)).alt.degree
-        
-        source_set=t0
-        alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
-        while alt>altitude_limit:
-            source_set += TimeDelta(1800., format='sec')
-            alt = skycoord.transform_to(AltAz(obstime=source_set, location=obs)).alt.degree
-
-        return source_rise,source_set
     
 
 def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
@@ -154,448 +113,10 @@ def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
     return t0, t1
 
 
-def list_msfiles(intime, lustre=True, file_path='slow', server=None, time_interval='10s', 
-                 bands=['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
-    """
-    Return a list of visibilities to be copied for pipeline processing for a given time
-    :param intime: astropy Time object
-    :param server: name of the server to list available data
-    :param lustre: if True, specific to lustre system on lwacalim nodes. If not, try your luck in combination with file_path
-    :param file_path: file path to the data files. For lustre, it is either 'slow' or 'fast'. For other servers, provide full path to data.
-    :param time_interval: Options are '10s', '1min', '10min'
-    :param bands: bands to list/download. Default to 12 bands above 30 MHz. Full list of available bands is
-            ['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']
-    """
-    intimestr = intime.isot[:-4].replace('-','').replace(':','').replace('T','_')
-    datestr = intime.isot[:10]
-    hourstr = intime.isot[11:13]
-    if time_interval == '10s':
-        tstr = intimestr[:-1]
-    if time_interval == '1min':
-        tstr = intimestr[:-2]
-    if time_interval == '10min':
-        tstr = intimestr[:-3]
-
-    msfiles = []
-    if lustre:
-        processes=[]
-        for b in bands:
-            pathstr = '/lustre/pipeline/{0:s}/{1:s}/{2:s}/{3:s}/'.format(file_path, b, datestr, hourstr)
-            if server:
-                cmd = 'ssh ' + server + ' ls ' + pathstr + ' | grep ' + tstr
-            else:
-                cmd = 'ls ' + pathstr + ' | grep ' + tstr
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
-            processes.append(p)
-            filenames = p.communicate()[0].decode('utf-8').split('\n')[:-1]
-            if len(filenames) > 0:
-                for filename in filenames:
-                    if filename[-6:] == 'MHz.ms':
-                        filestr = pathstr + filename
-                        tmpstr = filename[:15].replace('_', 'T')
-                        timestr = tmpstr[:4] + '-' + tmpstr[4:6] + '-' + tmpstr[6:11] + ':' + tmpstr[11:13] + ':' + tmpstr[13:]
-                        freqstr = filename[16:21]
-                        msfiles.append({'path': filestr, 'name': filename, 'time': timestr, 'freq': freqstr})
-            else:
-                logging.info('Did not find any files at the given time {0:s}.'.format(intime.isot)) 
-    else:
-        if server:
-            cmd = 'ssh ' + server + ' ls ' + file_path + ' | grep ' + tstr
-        else:
-            cmd = 'ls ' + file_path + ' | grep ' + tstr
-        p = subprocess.run(cmd, capture_output=True, shell=True)
-        filenames = p.stdout.decode('utf-8').split('\n')[:-1]
-        if len(filenames) > 0:
-            for filename in filenames:
-                if filename[-6:] == 'MHz.ms':
-                    if server:
-                        pathstr = '{0:s}:{1:s}/{2:s}'.format(server, file_path, filename)
-                    else:
-                        pathstr = '{0:s}/{1:s}'.format(file_path, filename)
-                    tmpstr = filename[:15].replace('_', 'T')
-                    timestr = tmpstr[:4] + '-' + tmpstr[4:6] + '-' + tmpstr[6:11] + ':' + tmpstr[11:13] + ':' + tmpstr[13:]
-                    freqstr = filename[16:21]
-                    msfiles.append({'path': pathstr, 'name': filename, 'time': timestr, 'freq': freqstr})
-        else:
-            logging.info('Did not find any files at the given time {0:s}.'.format(intime.isot)) 
-            msfiles = []
-    return msfiles
-
-def download_msfiles_cmd(msfile_path, server, destination):
-    if server:
-        p = subprocess.Popen(shlex.split('rsync -az --numeric-ids --info=progress2 --no-perms --no-owner --no-group {0:s}:{1:s} {2:s}'.format(server, msfile_path, destination)))
-    else:
-        #p = subprocess.Popen(shlex.split('rsync -az --numeric-ids --info=progress2 --no-perms --no-owner --no-group {0:s} {1:s}'.format(msfile_path, destination)))
-        p = subprocess.Popen(shlex.split('cp -r {0:s} {1:s}'.format(msfile_path, destination)))
-    std_out, std_err = p.communicate()
-    if std_err:
-        print('<<',Time.now().isot,'>>',std_err)
-
-def download_msfiles(msfiles, destination='/fast/solarpipe/realtime_pipeline/slow_working/', bands=None, verbose=True, server=None, maxthread=3):
-    from multiprocessing.pool import ThreadPool
-    """
-    Parallelized downloading for msfiles returned from list_msfiles() to a destination.
-    """
-    inmsfiles_path = [f['path'] for f in msfiles]
-    inmsfiles_name = [f['name'] for f in msfiles]
-    inmsfiles_band = [f['freq'] for f in msfiles]
-    omsfiles_path = []
-    omsfiles_name = []
-    if bands is None:
-        omsfiles_path = inmsfiles_path
-        omsfiles_name = inmsfiles_name
-    else:
-        for bd in bands:
-            if bd in inmsfiles_band:
-                idx = inmsfiles_band.index(bd)
-                #omsfiles_server.append(inmsfiles_server[idx])
-                omsfiles_path.append(inmsfiles_path[idx])
-                omsfiles_name.append(inmsfiles_name[idx])
-
-    nfile = len(omsfiles_path)
-    if nfile == 0:
-        print('<<',Time.now().isot,'>>','No files to download. Abort...')
-        return -1
-    time_bg = timeit.default_timer() 
-    if verbose:
-        print('<<',Time.now().isot,'>>','I am going to download {0:d} files'.format(nfile))
-
-    tp = ThreadPool(maxthread)
-    for omsfile_path in omsfiles_path:
-        tp.apply_async(download_msfiles_cmd, args=(omsfile_path, server, destination))
-
-    tp.close()
-    tp.join()
-
-    time_completed = timeit.default_timer() 
-    if verbose:
-        print('<<',Time.now().isot,'>>','Downloading {0:d} files took in {1:.1f} s'.format(nfile, time_completed-time_bg))
-    omsfiles = [destination + n for n in omsfiles_name]
-    return omsfiles
 
 
-def download_timerange(starttime, endtime, download_interval='1min', destination='/fast/solarpipe/20231027/slow/', 
-                server=None, lustre=True, file_path='slow', bands=None, verbose=True, maxthread=5):
-    '''
-    :param download_interval: If str should either be 10s, 1min or 10min. If integer should be in seconds.
-    '''
-    time_bg = timeit.default_timer() 
-    t_start = Time(starttime)
-    t_end = Time(endtime)
-    print('<<',Time.now().isot,'>>','Start time: ', t_start.isot)
-    print('<<',Time.now().isot,'>>','End time: ', t_end.isot)
-    if not os.path.exists(destination):
-        os.makedirs(destination)
-
-    if download_interval == '10s':
-        dt = TimeDelta(10., format='sec')
-    elif download_interval == '1min':
-        dt = TimeDelta(60., format='sec')
-    elif download_interval == '10min':
-        dt = TimeDelta(600., format='sec')
-    else:
-        try:
-            download_interval=int(download_interval)
-            if download_interval%10!=0:
-                logging.warning("Data is recorded with 10s cadence. Separation should be a multiple of 10."+\
-                                "Setting download interval to nearest multiple of 10")
-            dt=TimeDelta(download_interval,format='sec')
-        except Exception as e:
-            logging.error("download interval should either be 10s, 1min, 10min, or an integer in seconds")
-            print ("download interval should either be 10s, 1min, 10min, or an integer in seconds")
-            raise e
-    nt = int(np.ceil((t_end - t_start) / dt))
-    if isinstance(download_interval, int):
-        download_interval=str(download_interval)+"s"
-    print('====Will download {0:d} times at an interval of {1:s}===='.format(nt, download_interval))
-    for i in range(nt):
-        intime = t_start + i * dt
-        msfiles = list_msfiles(intime, server=server, lustre=lustre, file_path=file_path, time_interval='10s', bands=bands)
-        if verbose:
-            print('Downloading time ', intime.isot)
-        download_msfiles(msfiles, destination=destination, bands=bands, verbose=verbose, server=server, maxthread=maxthread)
-    time_completed = timeit.default_timer() 
-    if verbose:
-        print('====Downloading all {0:d} times took {1:.1f} s===='.format(nt, time_completed-time_bg))
 
 
-def download_calibms(calib_time, download_fold = '/lustre/solarpipe/realtime_pipeline/ms_calib/', doflag=True,
-        bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz']):
-    """
-    Function to download calibration ms files for all or selected bands based on a given time
-    :param calib_time: time selected for generating the calibration tables. A string recognized by astropy Time format
-    :param download_fold: directory to hold the downloaded ms files 
-    :param bands: band selection. Default to use all 16 bands.
-    """
-    if type(calib_time) == str:
-        try:
-            calib_time = Time(calib_time)
-        except:
-            print('The input time needs to be astropy.time.Time format')
-    print(socket.gethostname(), '=======Calibrating Time {0:s}======='.format(calib_time.isot))
-    ms_calib0 = list_msfiles(calib_time, file_path='slow', bands=bands)
-    ms_calib = download_msfiles(ms_calib0, destination=download_fold, bands=bands)
-    ms_calib.sort()
-    if doflag:
-        for ms_calib_ in ms_calib:
-            try:
-               antflagfile = flagging.flag_bad_ants(ms_calib_)
-            except:
-                exc_type, exc_obj, exc_tb = sys.exc_info()
-                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                logging.error(exc_type, fname, exc_tb.tb_lineno)
-    return ms_calib
-
-
-def gen_caltables(calib_in, bcaltb=None, uvrange='>10lambda', refant='202', flag_outrigger=True, 
-        proc_dir='./',doplot=True):
-    """
-    Function to generate calibration tables for a list of calibration ms files
-    :param calib_in: input used for calibration. This can be either a) a string of time stamp recognized by astropy.time.Time 
-            or b) a specific list of ms files used for calibration
-    :param bcaltb: name of the calibration tables. Use the default if None
-    :param uvrange: uv range to be used, default to '>10lambda'
-    :param refant: reference antenna, default to '202'
-    :param flag_outrigger: if True, flag all outrigger antennas. These would be used for beamforming.
-    :proc_dir: directory to process the data and hold output files.
-    """
-    import pandas as pd
-    download_fold = proc_dir + '/ms_calib/'
-    caltable_fold = proc_dir + '/caltables/'
-    beam_caltable_fold = proc_dir + '/caltables_beam/'
-
-    if not os.path.exists(download_fold):
-        os.makedirs(download_fold)
-
-    if not os.path.exists(caltable_fold):
-        os.makedirs(caltable_fold)
-
-    if not os.path.exists(beam_caltable_fold):
-        os.makedirs(beam_caltable_fold)
-
-    bcaltbs = []
-    chan_freqs = []
-    if type(calib_in) == list:
-        calib_in.sort()
-        ms_calib = calib_in
-    elif type(calib_in) == str:
-        try:
-            calib_time = Time(calib_in)
-        except:
-            print('<<',Time.now().isot,'>>','The input time needs to be astropy.time.Time format. Abort...')
-            return -1
-        ms_calib = download_calibms(calib_time, doflag=True, download_fold=download_fold)
-    else:
-        print('<<',Time.now().isot,'>>','Input not recognized. Abort...')
-        return -1
-
-    
-    if len(ms_calib) > 0:
-        # TODO: somehow the parallel processing failed if flagging has run. I have no idea why. Returning to the slow serial processing.
-        #pool = multiprocessing.pool.Pool(processes=len(ms_calib))
-        #gen_calib_partial = partial(calibration.gen_calibration, uvrange=uvrange, caltable_fold=caltable_fold,
-        #                refant=refant)
-        #result = pool.map_async(gen_calib_partial, ms_calib)
-        #timeout = 2000.
-        #result.wait(timeout=timeout)
-        #bcaltbs = result.get()
-        #pool.close()
-        #pool.join()
-        for ms_calib_ in ms_calib:
-            try:
-                bcaltb = calibration.gen_calibration(ms_calib_, uvrange=uvrange, caltable_fold=caltable_fold, refant=refant)
-                msmd.open(ms_calib_)
-                chan_freqs.append(msmd.chanfreqs(0))
-                msmd.done()
-                bcaltbs.append(bcaltb)
-            except Exception as e:
-                print('<<',Time.now().isot,'>>','Something is wrong when making calibrations for ', ms_calib_)
-                print(e)
-            
-        chan_freqs = np.concatenate(chan_freqs)
-        if doplot:
-            create_waterfall_plot(bcaltbs,ms_calib)
-    else:
-        print('<<',Time.now().isot,'>>','The list of calibration ms files seems to be empty. Abort...')
-        return -1
-        
-
-    if flag_outrigger:
-        core_ant_ids, exp_ant_ids = flagging.get_antids(ms_calib[0])
-        bcaltbs_bm = []
-        bmcalfac = []
-        for bcaltb in bcaltbs:
-            bcaltb_bm = beam_caltable_fold + '/' + os.path.basename(bcaltb)
-            os.system('cp -r ' + bcaltb + ' ' + bcaltb_bm)
-            tb.open(bcaltb_bm, nomodify=False)
-            flags = tb.getcol('FLAG')
-            npol, nch, nant = flags.shape
-            for exp_ant_id in exp_ant_ids:
-                flags[:, :, exp_ant_id] = True
-            num_ant_per_chan = nant - np.sum(flags, axis=2)
-            bmcalfac_per_chan = num_ant_per_chan ** 2.
-            bmcalfac.append(bmcalfac_per_chan)
-            tb.putcol('FLAG', flags)
-            tb.close()
-            bcaltbs_bm.append(bcaltb_bm)
-
-        bmcalfac = np.concatenate(bmcalfac, axis=1)
-        # write channel frequencies and corresponding beam scaling factors into a csv file
-        df = pd.DataFrame({"chan_freqs":chan_freqs, "calfac_x":bmcalfac[0], "calfac_y":bmcalfac[1]})
-        bcalfac_file = beam_caltable_fold + '/' + os.path.basename(bcaltb)[:15] + '_bmcalfac.csv'
-        df.to_csv(bcalfac_file, index=False)
-        return bcaltbs, bcaltbs_bm, bcalfac_file
-    else:
-        return bcaltbs
-
-def get_gain_amplitude_phase(caltable):
-    tb=table()
-    tb.open(caltable)
-    try:
-        data=tb.getcol('CPARAM')
-        flag=tb.getcol('FLAG')
-    finally:
-        tb.close()
-
-    pos=np.where(flag==True)
-    data[pos]=np.nan
-    return np.abs(data),np.angle(data)
-
-def get_caltable_freq(caltable):
-    tb=table()
-    tb.open(os.path.join(caltable,"SPECTRAL_WINDOW"))
-    try:
-        chan_freq=tb.getcol('CHAN_FREQ').flatten()
-    finally:
-        tb.close()
-    return chan_freq
-
-def robust_linear_fit(x,y,num_trial=5,thresh=3):
-    for i in range(num_trial):
-        pos=np.where(np.isnan(y)==False)
-        poly=np.polyfit(x[pos],y[pos],deg=1)
-        predicted_y=np.poly1d(poly)(x)
-        residual=predicted_y-y
-        std=np.nanstd(residual)
-        pos=np.where(residual>thresh*std)
-        y[pos]=np.nan
-    return poly
-    
-def find_delay(freqs,phase):
-    pos=np.where(phase<0)[0]
-    if pos.size>0:
-        phase+=2*np.pi ### assume that phase is from -pi to pi
-
-    pos=np.where((np.isnan(phase)==False) & (freqs>40*1e6))[0]
-    if pos.size==0:
-        return np.nan
-    phase1=phase[pos]
-    freqs1=freqs[pos]/1e6 ### converting to MHz
-    unwrapped_phase=np.unwrap(phase1)
-    delay=robust_linear_fit(freqs1,unwrapped_phase)[0]/(2*np.pi) ### delay is in microseconds
-    return delay
-    
-def find_delay_all_ant_corr(freqs,phase):
-    phase_shape=phase.shape
-    num_corr=phase_shape[0]
-    num_ant=phase_shape[2]
-    
-    delay=np.zeros((num_corr,num_ant))*np.nan
-    
-    for i in range(num_corr):
-        for j in range(num_ant):
-            wrapped_phase=phase[i,:,j]
-            delay[i,j]=find_delay(freqs,wrapped_phase)
-    return delay
-    
-def create_waterfall_plot(caltables,msnames,figname=None,num_chan=192,num_ant=352):
-    
-    bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
-            '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
-            '78MHz', '82MHz']
-            
-    msnames.sort()
-    
-    assert len(caltables)<=len(msnames),"The number of MS is smaller than the number of caltables. Please check"
-
-    num_msnames=len(msnames)
-    num_bands=len(bands)
-    
-    ms_freqs_str=[]
-    caltable_freqs=np.zeros(len(caltables))
-    
-    amp=np.zeros((2,num_bands*num_chan,num_ant))
-    phase=np.zeros((2,num_bands*num_chan,num_ant))
-    freqs=np.zeros((num_bands*num_chan))
-
-    for j,msname in enumerate(msnames):
-        ms_freqs_str.append(utils.get_freqstr_from_name(msname))
-    
-    for j,caltable in enumerate(caltables):
-        caltable_freqs[j]=get_caltable_freq(caltable)[0]/1e6 ### converting to MHz
-    
-
-    j=0   
-    for k,band in enumerate(bands):
-        if band!=ms_freqs_str[j]:
-            print ("MS file for "+band+" is missing")
-            amp[:,k*num_chan:(k+1)*num_chan,:]=np.nan
-            phase[:,k*num_chan:(k+1)*num_chan,:]=np.nan
-            freqs[k*num_chan:(k+1)*num_chan]=np.nan
-            continue    
-        msname=msnames[j]
-        ms_freq_MHz=int(ms_freqs_str[j].split('MHz')[0])
-        ind=np.argmin(abs(ms_freq_MHz-caltable_freqs))
-        #ind=caltable_freqs.index(ms_freqs[j])
-        if abs(ms_freq_MHz-caltable_freqs[ind])>2:
-            print ("Freq index not found. Some caltables have not been produced")
-            amp[:,k*num_chan:(k+1)*num_chan,:]=np.nan
-            phase[:,k*num_chan:(k+1)*num_chan,:]=np.nan
-            freqs[k*num_chan:(k+1)*num_chan]=np.nan
-        else:    
-            amp[:,k*num_chan:(k+1)*num_chan,:], phase[:,k*num_chan:(k+1)*num_chan,:]=\
-                                                            get_gain_amplitude_phase(caltables[ind])
-            freqs[k*num_chan:(k+1)*num_chan]=get_caltable_freq(caltables[ind])
-        j+=1
-    
-    delays=find_delay_all_ant_corr(freqs,phase)
-        
-    fig,ax=plt.subplots(nrows=2,ncols=1,sharex=True,figsize=[15,10])
-
-    for ind,pol in zip([0,1],['XX','YY']):
-        im=ax[ind].imshow(amp[ind,:,:],origin='lower',interpolation='none',vmax=0.005,\
-                            vmin=0.0002,cmap='viridis',extent=(0,351,13,87),aspect='auto')
-        ax[ind].set_title(pol)
-        plt.colorbar(im,ax=ax[ind])
-
-    fig.suptitle(utils.get_timestr_from_name(caltables[0]))
-    fig.supxlabel("Antenna")
-    fig.supylabel("Gain amplitude")
-
-    if not isinstance(figname,list):
-        figname_amp='_'.join(caltables[0].split('_')[:-1])+"_amp.png"
-    else:
-        figname_amp=figname[0]
-    plt.savefig(figname_amp)
-    plt.close()
-    
-    fig,ax=plt.subplots(nrows=2,ncols=1,sharex=True,figsize=[12,10])
-    
-    for ind,pol in zip([0,1],['XX','YY']):
-        im=ax[ind].plot(delays[ind],'ro')
-        ax[ind].set_title(pol)
-
-    fig.suptitle(utils.get_timestr_from_name(caltables[0]))
-    fig.supxlabel("Antenna")
-    fig.supylabel("Delay (microseconds)")
-    if not isinstance(figname,list):
-        figname_delay='_'.join(caltables[0].split('_')[:-1])+"_delay.png"
-    else:
-        figname_delay=figname[1]
-    plt.savefig(figname_delay)
-    plt.close()
-    
-    return
         
 def convert_caltables_for_fast_vis(solar_ms,calib_ms,caltables):
     fast_caltables=[]
@@ -643,7 +164,7 @@ def check_fast_ms(msname):
     
 def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=0, 
                 num_apcal=1, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
-                flagdir=None, delete_allsky=False, actively_rm_ms=True):
+                flagdir=None, delete_allsky=False, actively_rm_ms=True, stokes='I'):
     
     try:
         msmd.open(msfile)
@@ -698,7 +219,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
                                         do_final_imaging=False, do_fluxscaling=False, freqbin=1, \
                                         fast_vis=fast_vis, delete_allsky=delete_allsky,\
                                         fast_vis_image_model_subtraction=fast_vis_image_model_subtraction,\
-                                        sky_image=sky_image)
+                                        sky_image=sky_image,pol=stokes)
             if actively_rm_ms:
                 os.system('rm -rf ' + msfile)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
@@ -738,28 +259,28 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
     trc = int(512 + 128 - 1)
     region='box [ [ {0:d}pix , {1:d}pix] , [{2:d}pix, {3:d}pix ] ]'.format(blc, blc, trc, trc)
     try:
-        msmd.open(msfile_slfcaled)
-        trange = msmd.timerangeforobs(0)
-        msmd.close()
-        btime = Time(trange['begin']['m0']['value'], format='mjd')
-        etime = Time(trange['end']['m0']['value'], format='mjd')
-        tref_mjd = (btime.mjd + etime.mjd) / 2. 
-        tref = Time(tref_mjd, format='mjd')
-        tref_str = btime.isot+'~'+etime.isot
-        msinfo = hf.read_msinfo(msfile_slfcaled, verbose=True)
-        timeutc = me.epoch('UTC', '%fd' % tref.mjd)
-        ovro = me.observatory('OVRO_MMA')
-        me.doframe(ovro)
-        me.doframe(timeutc)
-        d0 = me.direction('SUN')
-        d0_j2000 = me.measure(d0, 'J2000')
-        azel = me.measure(d0, 'AZEL')
-        elev = np.degrees(azel['m1']['value'])
-        az = np.degrees(azel['m0']['value'])
-        pb = beam(msfile_slfcaled)
-        pb.srcjones(az=[az],el=[elev])
-        jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
-        sclfactor = 1. / jones_matrices[0][0]
+        #msmd.open(msfile_slfcaled)
+        #trange = msmd.timerangeforobs(0)
+        #msmd.close()
+        #btime = Time(trange['begin']['m0']['value'], format='mjd')
+        #etime = Time(trange['end']['m0']['value'], format='mjd')
+        #tref_mjd = (btime.mjd + etime.mjd) / 2. 
+        #tref = Time(tref_mjd, format='mjd')
+        #tref_str = btime.isot+'~'+etime.isot
+        #msinfo = hf.read_msinfo(msfile_slfcaled, verbose=True)
+        #timeutc = me.epoch('UTC', '%fd' % tref.mjd)
+        #ovro = me.observatory('OVRO_MMA')
+        #me.doframe(ovro)
+        #me.doframe(timeutc)
+        #d0 = me.direction('SUN')
+        #d0_j2000 = me.measure(d0, 'J2000')
+        #azel = me.measure(d0, 'AZEL')
+        #elev = np.degrees(azel['m1']['value'])
+        #az = np.degrees(azel['m0']['value'])
+        #pb = beam(msfile_slfcaled)
+        #pb.srcjones(az=[az],el=[elev])
+        #jones_matrices = pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
+        sclfactor = 1.
         helio_imagename = imagedir_allch + os.path.basename(msfile_slfcaled).replace('.ms','.sun')
 
         if not os.path.exists(imagedir_allch):
@@ -784,15 +305,16 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         
         logging.info('Found {0:d} images'.format(len(outfits)))
         if len(outfits) > 0:
-            if use_jpl_ephem:
-                outfits_helio = hf.imreg(msfile_slfcaled, outfits, ephem=ephem, msinfo=msinfo, timerange=[tref_str] * len(outfits), 
-                    usephacenter=True, verbose=True, toTb=True, subregion=region, sclfactor=sclfactor)
-            else:
-                outfits_helio = []
-                for outfit in outfits:
-                    # single fits conversion
-                    outfits_helio.append(ocoords.fitsj2000tohelio(outfit, out_fits=None, toK=True, verbose=False, sclfactor=sclfactor, subregion=[blc, trc, blc, trc]))
-                #outfits_helio = ocoords.fitsj2000tohelio(outfits, out_fits=None, reftime="", toK=True, verbose=False, sclfactor=sclfactor)
+            #if use_jpl_ephem:
+            #    outfits_helio = hf.imreg(msfile_slfcaled, outfits, ephem=ephem, msinfo=msinfo, timerange=[tref_str] * len(outfits), 
+            #        usephacenter=True, verbose=True, toTb=True, subregion=region, sclfactor=sclfactor)
+            #else:
+            outfits_helio = []
+            for outfit in outfits:
+                # single fits conversion
+                outfits_helio.append(ocoords.fitsj2000tohelio(outfit, out_fits=None, toK=True, verbose=False,\
+                                         sclfactor=sclfactor, subregion=[blc, trc, blc, trc]))
+            #outfits_helio = ocoords.fitsj2000tohelio(outfits, out_fits=None, reftime="", toK=True, verbose=False, sclfactor=sclfactor)
             return outfits_helio
         else:
             logging.error('No fits images produced.')
@@ -917,14 +439,14 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
 
                     fits_mfs_lv15 = orefr.apply_refra_record(fits_mfs_lv10, refra_rec, fname_out=fits_mfs_lv15)
                     if fits_mfs_lv15:
-                        utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
+                        #utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
                         fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
                         fig.savefig(fig_mfs_dir_lv15 + datedir + figname_lv15)
                         figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
                         os.system('cp '+ fig_mfs_dir_lv15 + datedir + figname_lv15 + ' ' + fig_mfs_dir_synop + datedir + figname_synop)
 
                         fits_fch_lv15 = orefr.apply_refra_record(fits_fch_lv10, refra_rec, fname_out=fits_fch_lv15)
-                        utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
+                        #utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
 
                 else:
                     print('<<',Time.now().isot,'>>','Refraction correction failed for '+ datetimestr)
@@ -933,13 +455,13 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
                         fits_mfs_lv15 = orefr.apply_refra_record(fits_mfs_lv10, df, fname_out=fits_mfs_lv15, interp=interp_method, max_dt=max_dt)
                         if fits_mfs_lv15:
                             print('<<',Time.now().isot,'>>','Succeeded and updating level 1.5 files, but be cautious!')
-                            utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
+                            #utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
                             fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
                             fig.savefig(fig_mfs_dir_lv15 + datedir + figname_lv15)
                             figname_synop = figname_lv15.replace('.lev1.5_mfs_10s.', '.synop_mfs_10s.')
                             os.system('cp '+ fig_mfs_dir_lv15 + datedir + figname_lv15 + ' ' + fig_mfs_dir_synop + datedir + figname_synop)
                             fits_fch_lv15 = orefr.apply_refra_record(fits_fch_lv10, df, fname_out=fits_fch_lv15, interp=interp_method, max_dt=max_dt)
-                            utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
+                            #utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
                         else:
                             print('<<',Time.now().isot,'>>','Interpolation failed')
                             continue
@@ -947,7 +469,345 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
             logging.error(e)
             logging.error('====Processing {0:s} failed'.format(fits_fch_lv10))
 
+def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/', \
+                                overwrite=True, slowfast='slow',\
+                                 leakage_database='/lustre/msurajit/leakage_database.db',stokes='I,Q,U,V'):
+    """
+    Function for doing daily refraction corrections based on level 1 fits files produced in a given solar day
+    :param date: format 'yyyy-mm-dd' or an astropy.time.Time object or an astropy.time.Time compatible string
+    :param save_dir: directory to save the data prodcuts. Need to have a substructure of lev1/yyyy/mm/dd for level 1 files, and lev15/yyyy/mm/dd for level 1.5 files
+    :param overwrite: if True, overwrite the existing level 1.5 and refraction coefficient csv file
+    :param overbright: peak brightness temperature exceeding this value (in Kelvin) will be excluded for fitting
+    :param interp: interpolation method used by scipy.interpolation.interp1d. Default to 'linear'
+    :param max_dt: maximum time difference to perform the interpolation in seconds
+    """
+    if isinstance(date, str):
+        try:
+            date0 = Time(date)
+        except:
+            print('<<',Time.now().isot,'>>',"Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
+    elif isinstance(date, Time):
+        date0 = date
+    else:
+        print('<<',Time.now().isot,'>>',"Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
 
+    # define output directories
+    fits_dir = save_dir + '/fits/' + slowfast + '/'
+    fits_dir_lv10 = fits_dir + '/lev1/' 
+    fits_dir_lv15 = fits_dir + '/lev15/' 
+    
+    
+    
+    
+    fits_dir_lv20 = fits_dir + '/lev2/' 
+    fits_dir_lv25 = fits_dir + '/lev25/' 
+    
+    
+    hdf_dir = save_dir + '/hdf/' + slowfast + '/'
+    
+    hdf_dir_lv20 = hdf_dir + '/lev2/' 
+    hdf_dir_lv25 = hdf_dir + '/lev25/' 
+    
+    hdf_dir_lv10 = hdf_dir + '/lev1/' 
+    hdf_dir_lv15 = hdf_dir + '/lev15/' 
+    
+    
+    
+    print ("Inside the leakage correction function")
+    
+
+    # Note the following reorganization is only for synoptic plots and refraction csv files
+    # if UT time is before 3 UT, assign it to the earlier date. 
+    datestr_synop = date0.isot.split('T')[0].replace('-','')
+
+    datedir0 = date0.isot.split('T')[0].replace('-','/')+'/'
+    date1 = date0 + TimeDelta(1., format='jd')
+    datedir1 = date1.isot.split('T')[0].replace('-','/')+'/'
+    fits_fch0_lv10 = glob.glob(fits_dir_lv10 + datedir0 + '*fch*.fits')
+    fits_fch0_lv10.sort()
+    fits_fch1_lv10 = glob.glob(fits_dir_lv10 + datedir1 + '*fch*.fits')
+    fits_fch1_lv10.sort()
+    # narrow down to all files between 13 UT and 03 UT of the second day 
+    fits_fch_lv10_all_ = fits_fch0_lv10 + fits_fch1_lv10
+    fits_fch_lv10_all = []
+
+    
+    print (fits_fch_lv10_all_)
+    for f in fits_fch_lv10_all_:
+        datestr = os.path.basename(f).split('.')[2].split('T')[0]
+        timestr = os.path.basename(f).split('.')[2].split('T')[1][:-1]
+        datetimestr = datestr + 'T' + timestr[:2] + ':' + timestr[2:4] + ':' + timestr[4:]
+        if Time(datetimestr).mjd > Time(date0).mjd + 13./24.  and Time(datetimestr).mjd < Time(date1).mjd + 3./24.:
+            fits_fch_lv10_all.append(f)
+
+    fits_fch_lv10_all.sort()
+
+    
+    #### Updating the database
+    for fits_fch_lv10 in fits_fch_lv10_all:
+        fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
+        leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now   
+        leakc.write_to_database(fits_mfs_lv10,leak_frac,database=leakage_database)   
+    
+    for fits_fch_lv10 in fits_fch_lv10_all:
+        fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
+        print('<<',Time.now().isot,'>>','processing fits '+fits_fch_lv10)
+        datestr = os.path.basename(fits_fch_lv10).split('.')[2].split('T')[0]
+        timestr = os.path.basename(fits_fch_lv10).split('.')[2].split('T')[1][:-1]
+        datetimestr = datestr + 'T' + timestr[:2] + ':' + timestr[2:4] + ':' + timestr[4:]
+        datedir = datestr.replace('-','/') + '/'
+        if not os.path.exists(fits_dir_lv25 + datedir):
+            os.makedirs(fits_dir_lv25 + datedir)
+        if not os.path.exists(hdf_dir_lv25 + datedir):
+            os.makedirs(hdf_dir_lv25 + datedir)
+        
+        if not os.path.exists(fits_dir_lv20 + datedir):
+            os.makedirs(fits_dir_lv20 + datedir)
+        if not os.path.exists(hdf_dir_lv20 + datedir):
+            os.makedirs(hdf_dir_lv20 + datedir)
+        
+        fits_mfs_lv15 = fits_dir_lv15 + datedir + os.path.basename(fits_mfs_lv10.replace('.lev1_mfs', '.lev1.5_mfs'))
+        fits_fch_lv15 = fits_dir_lv15 + datedir + os.path.basename(fits_fch_lv10.replace('.lev1_fch', '.lev1.5_fch'))
+
+        try:
+            fits_mfs_lv20 = fits_dir_lv20 + datedir + os.path.basename(fits_mfs_lv10.replace('.lev1_mfs', '.lev2_mfs'))
+            fits_fch_lv20 = fits_dir_lv20 + datedir + os.path.basename(fits_fch_lv10.replace('.lev1_fch', '.lev2_fch'))
+            
+            hdf_mfs_lv20 = hdf_dir_lv20 + datedir + os.path.basename(fits_mfs_lv20).replace('.fits', '.hdf')
+            hdf_fch_lv20 = hdf_dir_lv20 + datedir + os.path.basename(fits_fch_lv20).replace('.fits', '.hdf')
+            
+            
+            fits_fch_lv20=leakc.do_leakage_correction(fits_fch_lv10,leakage_database,outfile=fits_fch_lv20)
+            fits_mfs_lv20=leakc.do_leakage_correction(fits_mfs_lv10,leakage_database, outfile=fits_mfs_lv20)
+            
+            #utils.compress_fits_to_h5(fits_mfs_lv20, hdf_mfs_lv20)
+            #utils.compress_fits_to_h5(fits_fch_lv20, hdf_fch_lv20)
+            
+            
+            
+            fits_mfs_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_mfs_lv10.replace('.lev1_mfs', '.lev2.5_mfs'))
+            fits_fch_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_fch_lv10.replace('.lev1_fch', '.lev2.5_fch'))
+            
+            hdf_mfs_lv15 = hdf_dir_lv15 + datedir + os.path.basename(fits_mfs_lv15).replace('.fits', '.hdf')
+            hdf_fch_lv15 = hdf_dir_lv15 + datedir + os.path.basename(fits_fch_lv15).replace('.fits', '.hdf')
+            
+            if os.path.isfile(fits_mfs_lv15):
+                fits_mfs_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_mfs_lv15.replace('.lev1.5_mfs', '.lev2.5_mfs'))
+                fits_fch_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_fch_lv15.replace('.lev1.5_fch', '.lev2.5_fch'))
+                
+                hdf_mfs_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_mfs_lv25).replace('.fits', '.hdf')
+                hdf_fch_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_fch_lv25).replace('.fits', '.hdf')
+                
+                fits_mfs_lv25=leakc.do_leakage_correction(fits_mfs_lv15,leakage_database, outfile=fits_mfs_lv25)    
+                #utils.compress_fits_to_h5(fits_mfs_lv25, hdf_mfs_lv25)
+                
+                fits_fch_lv25=leakc.do_leakage_correction(fits_fch_lv15,leakage_database, outfile=fits_fch_lv25)    
+                #utils.compress_fits_to_h5(fits_fch_lv25, hdf_fch_lv25)
+                
+       
+        except Exception as e:
+            logging.error(e)
+            logging.error('====Processing {0:s} failed'.format(fits_fch_lv10))
+            
+def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/', \
+                                overwrite=True, slowfast='slow',stokes='I'):
+    """
+    Function for doing daily refraction corrections based on level 1 fits files produced in a given solar day
+    :param date: format 'yyyy-mm-dd' or an astropy.time.Time object or an astropy.time.Time compatible string
+    :param save_dir: directory to save the data prodcuts. Need to have a substructure of lev1/yyyy/mm/dd for level 1 files, and lev15/yyyy/mm/dd for level 1.5 files
+    :param overwrite: if True, overwrite the existing level 1.5 and refraction coefficient csv file
+    :param overbright: peak brightness temperature exceeding this value (in Kelvin) will be excluded for fitting
+    :param interp: interpolation method used by scipy.interpolation.interp1d. Default to 'linear'
+    :param max_dt: maximum time difference to perform the interpolation in seconds
+    """
+    if isinstance(date, str):
+        try:
+            date0 = Time(date)
+        except:
+            print('<<',Time.now().isot,'>>',"Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
+    elif isinstance(date, Time):
+        date0 = date
+    else:
+        print('<<',Time.now().isot,'>>',"Input date not recognizable. Must be 'yyyy-mm-dd' or astropy format.")
+
+    # define output directories
+    fits_dir = save_dir + '/fits/' + slowfast + '/'
+    fits_dir_lv10 = fits_dir + '/lev1/' 
+    fits_dir_lv15 = fits_dir + '/lev15/' 
+    
+    
+    
+    
+    fits_dir_lv20 = fits_dir + '/lev2/' 
+    fits_dir_lv25 = fits_dir + '/lev25/' 
+    
+    
+    hdf_dir = save_dir + '/hdf/' + slowfast + '/'
+    
+    hdf_dir_lv20 = hdf_dir + '/lev2/' 
+    hdf_dir_lv25 = hdf_dir + '/lev25/' 
+    
+    hdf_dir_lv10 = hdf_dir + '/lev1/' 
+    hdf_dir_lv15 = hdf_dir + '/lev15/' 
+    
+    
+    
+    logging.info("Correcting for the self-terms of the primary beam")
+    
+
+    # Note the following reorganization is only for synoptic plots and refraction csv files
+    # if UT time is before 3 UT, assign it to the earlier date. 
+    datestr_synop = date0.isot.split('T')[0].replace('-','')
+
+    datedir0 = date0.isot.split('T')[0].replace('-','/')+'/'
+    date1 = date0 + TimeDelta(1., format='jd')
+    datedir1 = date1.isot.split('T')[0].replace('-','/')+'/'
+    
+    
+    
+    for dir1 in [fits_dir_lv10,fits_dir_lv20,fits_dir_lv15,fits_dir_lv25]:
+        hdf_dir1=os.path.join(hdf_dir,os.path.basename(dir1[:-1]))+"/"
+        
+        for datedir in [datedir0,datedir1]:
+            if not os.path.exists(hdf_dir1 + datedir):
+                os.makedirs(hdf_dir1 + datedir)
+    
+            for str1 in ['fch','mfs']:
+                if os.path.exists(dir1 + datedir0):
+                    fits_lv_d0 = glob.glob(dir1 + datedir0 + '*'+str1+'*.fits')
+                    fits_lv_d0.sort()
+                else:
+                    fits_lv_d0=[]
+                if os.path.exists(dir1 + datedir1):
+                    fits_lv_d1 = glob.glob(dir1 + datedir1 + '*'+str1+'*.fits')
+                    fits_lv_d1.sort()
+                else:
+                    fits_lv_d1=[]
+                # narrow down to all files between 13 UT and 03 UT of the second day 
+                fits_lv_all_ = fits_lv_d0 + fits_lv_d1
+                fits_lv_all = []
+
+        
+                for f in fits_lv_all_:
+                    #datestr = os.path.basename(f).split('.')[2].split('T')[0]
+                    #timestr = os.path.basename(f).split('.')[2].split('T')[1][:-1]
+                    #datetimestr = datestr + 'T' + timestr[:2] + ':' + timestr[2:4] + ':' + timestr[4:]
+                    with fits.open(f) as hdu:
+                        datetimestr=hdu[0].header['DATE-OBS']
+                    if Time(datetimestr).mjd > Time(date0).mjd + 13./24.  and Time(datetimestr).mjd < Time(date1).mjd + 3./24.:
+                        fits_lv_all.append(f)
+                
+                for img in fits_lv_all:
+                    try:
+                        correct_primary_beam_self_terms(img,pol=stokes)
+                        with fits.open(img) as hdu:
+                            datetimestr=hdu[0].header['DATE-OBS']
+                            datedir_path=(Time(datetimestr).datetime).strftime("%Y/%m/%d/")
+                        hdf_file=os.path.join(hdf_dir1,datedir_path,os.path.basename(img).replace('.fits','.hdf'))
+                        print (img,hdf_file)
+                        utils.compress_fits_to_h5(img, hdf_file)
+                        print ("--------------hdf5 file written-------------------")
+                   
+                    except Exception as e:
+                        logging.error(e)
+                        logging.error('====Processing {0:s} failed'.format(img))
+            
+def correct_primary_beam_self_terms(imagename, pol='I'):
+    '''
+    Can handle multiple images in a list. However if providing multiple images
+    provide full name of files. No addition to filename is done.
+    If single file is provided, we can add '.image.fits' to it. 
+    Can only handle IQUV or I images. If IQUV image, first combine the IQUV images 
+    using combine_IQUV_images function in utils.py
+    
+    This function only corrects for the self-terms of the Muller Matrix.
+    
+    [[M00     0       0   0],
+     [M10    M11      0   0],
+     [M20     0      M22  0],
+     [M30     0      0    M33] [Is,Qs,Us,Vs]=[Io,Qo,Uo,Vo]
+    Is,Qs,Us, Vs are the source Stokes parameters.
+    Io,Qo,Uo,Vo are the pbserved Stokes parameters.
+    This function corrects only for M00, M11, M22 and M33.
+    
+    If fast_vis is true, then things need to be changed. Fast vis is not tested after 
+    major modifications done on April 15, 2025
+    '''
+    
+    
+    meta, data = ndfits.read(imagename)
+    meta_header=meta['header']
+    
+    head=fits.getheader(imagename)
+    key_list=[]
+    keys=head.keys()
+    for key in keys:
+        key_list.append(key)
+    
+    if 'BEAMCOR' in key_list:
+        logging.debug("Image already has been corrected for self-terms")
+        print ("Image already has been corrected for self-terms")
+        return
+    
+    
+    shape=data.shape
+    num_stokes=shape[0]
+    num_freqs=shape[1]
+    
+    
+    obstime=Time(meta_header['DATE-OBS'])
+    az,alt=utils.get_solar_altaz_multiple_times(obstime)
+    
+    
+    freqs_db=np.arange(29,90,4) ### The highest frequency calculated with this range is 89
+    scale_db=np.zeros((4,freqs_db.size))
+
+    for freq_db_ind,freq1 in enumerate(freqs_db):
+        pb=beam(freq=freq1)
+    
+        pb.read_beam_file()
+        pb.srcjones(az=np.array([az]),el=np.array([alt]))
+        jones_matrices=pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
+        muller_matrix=pb.get_muller_matrix_stokes(pb.jones_matrices[0,:,:])
+        
+        for stokes_ind in range(4):
+            scale_db[stokes_ind,freq_db_ind]=muller_matrix[stokes_ind,stokes_ind].real
+        
+    
+    frequency=meta['ref_cfreqs']*1e-6
+    muller_matrix_order={'I':0,'Q':1,'U':2,'V':3}
+    
+    cols=[]
+    if pol=='I':
+        scale=np.expand_dims(np.interp(frequency,freqs_db,scale_db[0,:]),axis=(1,2))
+        data[0,...]=data[0,...]/scale
+        beam_self=scale.squeeze()
+        fitscol=fits.Column(name=pol+"_self",format='E',array=beam_self)  
+                    ## E stands for single precision float (32-bit). Change to D for double precision
+                    ## see https://docs.astropy.org/en/stable/io/fits/usage/table.html#column-creation
+        cols.append(fitscol)
+    else:
+        stokes_order=meta_header['polorder']
+        pols=stokes_order.split(',')
+        beam_self=np.zeros(frequency.size)
+        for j,pol in enumerate(pols):
+            muller_matrix_index=muller_matrix_order[pol]
+            scale=np.expand_dims(np.interp(frequency,freqs_db,scale_db[muller_matrix_index,:]),axis=(1,2))
+            data[j,...]=data[j,...]/scale
+            beam_self[:]=scale.squeeze()
+            print (pol+"_self")
+            fitscol=fits.Column(name=pol+"_self",format='E',array=beam_self)  
+                    ## E stands for single precision float (32-bit). Change to D for double precision
+                    ## see https://docs.astropy.org/en/stable/io/fits/usage/table.html#column-creation
+            cols.append(fitscol)
+    
+    header={}
+    header['beamcor']=True
+            
+        
+    ndfits.update(imagename,new_data=data,new_columns=cols, new_header_entries=header)
+    print ("data and headers updated")
+        
 
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 
             min_nband=6, nch_out=12, beam_fit_size=2, briggs=-0.5, stokes='I', do_selfcal=True, num_phase_cal=0, num_apcal=1, 
@@ -959,7 +819,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6, save_selfcaltab=False,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
             bands = ['32MHz', '36MHz', '41MHz', '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', '78MHz', '82MHz'],
-            clear_old_files=True, clear_older_than=45, actively_rm_ms=True):
+            clear_old_files=True, clear_older_than=45, actively_rm_ms=True, leakage_database='/lustre/msurajit/leakage_database.db'):
     """
     Pipeline for processing and imaging slow visibility data
     :param time_start: start time of the visibility data to be processed
@@ -1084,16 +944,16 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         print('<<',Time.now().isot,'>>')
         print(socket.gethostname(), '=======Processing Time {0:s}======='.format(image_time.isot))
         #logging.info('=======Processing Time {0:s}======='.format(image_time.isot))
-        msfiles0 = list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s')
+        msfiles0 = data_downloader.list_msfiles(image_time, lustre=lustre, server=server, file_path=file_path, time_interval='10s')
         
         if len(msfiles0) < len(bands):
             # try to find missing times from nearby times that are +-4 s within the reference time
-            msfiles0_before = list_msfiles(image_time - TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
+            msfiles0_before = data_downloader.list_msfiles(image_time - TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
             if len(msfiles0_before) > 0:
                 msfiles0_before_ts = [f['time'] for f in msfiles0_before]
             else:
                 msfiles0_before_ts = []
-            msfiles0_after = list_msfiles(image_time + TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
+            msfiles0_after = data_downloader.list_msfiles(image_time + TimeDelta(10., format='sec'), lustre=lustre, server=server, file_path=file_path, time_interval='10s')
             if len(msfiles0_after) > 0:
                 msfiles0_after_ts = [f['time'] for f in msfiles0_after]
             else:
@@ -1112,6 +972,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
 
         # check if the currently requested time has enough number of bands
+        min_nband=min(min_nband, len(bands))
         if len(msfiles0) < min(min_nband, len(bands)):
             #print('This time only has {0:d} subbands. Check nearby +-10s time.'.format(len(msfiles0)))
             #if slowfast.lower()=='slow':
@@ -1179,7 +1040,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             print('<<',Time.now().isot,'>>','==Copying file over to working directory==')
             logging.debug('====Copying file over to working directory====')
             time1 = timeit.default_timer()
-            msfiles = download_msfiles(msfiles0, destination=visdir_work, bands=bands)
+            msfiles = data_downloader.download_msfiles(msfiles0, destination=visdir_work, bands=bands)
             time2 = timeit.default_timer()
             logging.debug('Time taken to copy files is {0:.1f} s'.format(time2-time1))
 
@@ -1192,7 +1053,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             #result = pool.map_async(run_calib, msfiles)
             run_calib_partial = partial(run_calib, msfiles_cal=msfiles_cal, bcal_tables=bcal_tables, do_selfcal=do_selfcal, 
                     num_phase_cal=num_phase_cal, num_apcal=num_apcal, logger_file=logger_file, caltable_folder=gaintable_folder, 
-                    visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky, actively_rm_ms=actively_rm_ms)
+                    visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky, actively_rm_ms=actively_rm_ms,
+                    stokes=stokes)
 
             if slowfast.lower()=='slow':
                 timeout = 800.
@@ -1360,12 +1222,26 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     if not os.path.exists(fig_mfs_dir_sub_synop):
                         os.makedirs(fig_mfs_dir_sub_synop)
                     
-                     
-                    fits_images, plotted_image = compress_plot_images(fitsfiles, btime, datedir, imagedir_allch_combined, hdf_dir, \
+                    fitsfiles.sort()
+                    if stokes!='I':
+                        allstokes_fits=combine_pol_images(fitsfiles,stokes)
+                        for fitsimages in allstokes_fits: 
+                            utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
+                    else:
+                        allstokes_fits=fitsfiles
+                    
+                    
+                    fits_images, plotted_image = compress_plot_images(allstokes_fits, btime, datedir, imagedir_allch_combined, hdf_dir, \
                                             fig_mfs_dir, stokes, fast_vis=fast_vis)
+                    
+                    
                     
                     logging.info("Level 1 images plotted ok")
                     figname_to_copy=None
+                    
+                    
+                                  
+                    
                     
                     # Do refraction corrections
                     if not fast_vis:    
@@ -1495,8 +1371,56 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
                 
     return fitsfiles
 
+def combine_pol_images(fitsfiles,stokes):
+    num_freqs=len(fitsfiles)
+    freqs=[None]*num_freqs
+    
+    for i in range(num_freqs):
+        freqs[i]=utils.get_freqstr_from_name(fitsfiles[i][0])
+    
+    pols=stokes.split(',')
+    
+    
+    
+    
+    
+    multi_freq_files=[None]*num_freqs
+    for freq_id,freq_files in enumerate(fitsfiles):
+        multi_pol_fitsfiles=[]
+        stokes_images={}
+        stokes_order=''
+        for pol in pols:
+            stokes_images[pol]=[]
+        for img in freq_files:
+            pol=img.split('-')[-2]
+            stokes_images[pol].append(img)
+            
+        if len(pols)!=1:
+            for j,pol in enumerate(pols):
+                files=stokes_images[pol]
+                files.sort()
+                multi_pol_fitsfiles.append(files)
+                stokes_order+=pol
+            stokes_order=','.join(stokes_order)
+            num_files=len(multi_pol_fitsfiles[0])
+            multi_pol_fitsfiles=np.array(multi_pol_fitsfiles)
+            fitsfiles_pol_combined=[None]*num_files
+            for j in range(num_files):
+                outfits=utils.combine_IQUV_images(multi_pol_fitsfiles[:,j].tolist(),stokes_order=stokes_order)
+                fitsfiles_pol_combined[j]=outfits
+        
+        multi_freq_files[freq_id]=fitsfiles_pol_combined
+        
+    return multi_freq_files
+    
+    
+       
+
 def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined, \
                             hdf_dir, fig_mfs_dir, stokes, fast_vis=False):    
+                            
+    
+        
 
     if fast_vis:
         imagename_pre = 'ovro-lwa-48'
@@ -1506,13 +1430,12 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     
     btime=starttime
     imagedir_allch_combined_sub_lv10 = imagedir_allch_combined + '/lev1/' + datedir
-    hdf_dir_sub_lv10 = hdf_dir + '/lev1/' + datedir
+    
     fig_mfs_dir_sub_lv10 = fig_mfs_dir + '/lev1/' + datedir
 
     if not os.path.exists(imagedir_allch_combined_sub_lv10):
        os.makedirs(imagedir_allch_combined_sub_lv10)
-    if not os.path.exists(hdf_dir_sub_lv10):
-       os.makedirs(hdf_dir_sub_lv10)
+    
     
     if not os.path.exists(fig_mfs_dir_sub_lv10):
         os.makedirs(fig_mfs_dir_sub_lv10)
@@ -1521,7 +1444,8 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     timestr_iso = btime.isot[:-4].replace(':','')+'Z'
     
     # multi-frequency synthesis images
-    fits_mfs = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_mfs_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
+    fits_mfs = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_mfs_10s.' + \
+                timestr_iso + '.image_'+stokes.replace(',','')+'.fits' 
     #fitsfiles_mfs = glob.glob(imagedir_allch + '/' + timestr+ '*MFS-image.fits')
     fitsfiles_mfs = []
     for f in fitsfiles:
@@ -1539,15 +1463,12 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     
     ndfits.wrap(fitsfiles_mfs, outfitsfile=fits_mfs)
     
-    hdf_mfs = hdf_dir_sub_lv10 + os.path.basename(fits_mfs).replace('.fits', '.hdf')
-    if fast_vis:
-        utils.compress_fits_to_h5(fits_mfs, hdf_mfs, purge_corrupted=True)
-    else:
-        utils.compress_fits_to_h5(fits_mfs, hdf_mfs, purge_corrupted=False)
+    
     
     #if not fast_vis:
     # fine channel spectral images
-    fits_fch = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_fch_10s.' + timestr_iso + '.image_'+stokes+'.fits' 
+    fits_fch = imagedir_allch_combined_sub_lv10 + '/' + imagename_pre + '.lev1_fch_10s.' + \
+                    timestr_iso + '.image_'+stokes.replace(',','')+'.fits' 
     fitsfiles_fch = []
     for f in fitsfiles:
         if type(f) is list:
@@ -1556,13 +1477,9 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
             continue
     fitsfiles_fch.sort()
     ndfits.wrap(fitsfiles_fch, outfitsfile=fits_fch)
-    hdf_fch = hdf_dir_sub_lv10 + os.path.basename(fits_fch).replace('.fits', '.hdf')
-    if fast_vis:
-        utils.compress_fits_to_h5(fits_fch, hdf_fch, purge_corrupted=True)
-    else:
-        utils.compress_fits_to_h5(fits_fch, hdf_fch, purge_corrupted=False)
     
-    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs)
+    
+    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs,apply_fiducial_primary_beam=True)
     figname_lv10 = os.path.basename(fits_mfs).replace('.fits', '.png')
     fig.savefig(fig_mfs_dir_sub_lv10 + '/' + figname_lv10)
     
@@ -1610,12 +1527,12 @@ def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir
         fits_mfs_lv15 = imagedir_allch_combined_sub_lv15 + os.path.basename(fits_mfs.replace('.lev1_mfs', '.lev1.5_mfs'))
         fits_mfs_lv15 = orefr.apply_refra_coeff(fits_mfs, px, py, fname_out=fits_mfs_lv15)
         hdf_mfs_lv15 = hdf_dir_sub_lv15 + os.path.basename(fits_mfs_lv15).replace('.fits', '.hdf')
-        utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
+        #utils.compress_fits_to_h5(fits_mfs_lv15, hdf_mfs_lv15)
 
         fits_fch_lv15 = imagedir_allch_combined_sub_lv15 + os.path.basename(fits_fch.replace('.lev1_fch', '.lev1.5_fch'))
         fits_fch_lv15 = orefr.apply_refra_coeff(fits_fch, px, py, fname_out=fits_fch_lv15)
         hdf_fch_lv15 = hdf_dir_sub_lv15 + os.path.basename(fits_fch_lv15).replace('.fits', '.hdf')
-        utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
+        #utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
 
         fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
         figname_lv15 = os.path.basename(fits_mfs_lv15).replace('.fits', '.png')
@@ -1672,7 +1589,9 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         do_daily_refracorr=True,
         slurm_kill_after_sunset=False,
         clear_old_files=True, clear_older_than=30, actively_rm_ms=True, 
-        use_jpl_ephem=False):
+        use_jpl_ephem=False,
+        stokes='I',
+        leakage_database='/lustre/msurajit/leakage_database.db'):
     '''
     Main routine to run the pipeline. Note each time stamp takes about 8.5 minutes to complete.
     "time_interval" needs to be set to something greater than that. 600 is recommended.
@@ -1792,9 +1711,17 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             #loop_count=0 
         
         if time_end:
+            
             if time_start > Time(time_end):
                 logging.info('The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
                 print('<<',Time.now().isot,'>>','The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
+                
+                if stokes=='I,Q,U,V':
+                    print ("Doing leakage correction")
+                    daily_leakage_correction(date_synop,save_dir=save_dir,overwrite=False, leakage_database=leakage_database, stokes=stokes)
+                
+                daily_beam_correction(date_synop, save_dir=save_dir, overwrite=False,stokes=stokes)
+                
                 
                 if slurm_kill_after_sunset:
                     # sleep for 15min for continuous imaging of all nodes to finish
@@ -1812,15 +1739,15 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         logging.info('{0:s}: Start processing {1:s}'.format(socket.gethostname(), time_start.isot))
 
         # do one round of cleaning up old files before pipeline_quick
-
+        
         res = pipeline_quick(time_start, do_selfcal=do_selfcal, num_phase_cal=num_phase_cal, num_apcal=num_apcal, 
                             server=server, lustre=lustre, file_path=file_path, slowfast=slowfast, delete_ms_slfcaled=delete_ms_slfcaled,
                             logger_file=logger_file, proc_dir=proc_dir,  proc_dir_mem=proc_dir_mem, save_dir=save_dir, calib_dir=calib_dir, 
                             calib_file=calib_file, delete_working_ms=delete_working_ms,
                             delete_working_fits=delete_working_fits, do_refra=do_refra,
                             beam_fit_size=beam_fit_size, briggs=briggs, do_imaging=do_imaging, bands=bands, delete_allsky=delete_allsky, save_allsky=save_allsky,
-                            clear_old_files=clear_old_files, clear_older_than=clear_older_than, save_selfcaltab=save_selfcaltab, actively_rm_ms=actively_rm_ms)
-
+                            clear_old_files=clear_old_files, clear_older_than=clear_older_than, save_selfcaltab=save_selfcaltab, actively_rm_ms=actively_rm_ms, stokes=stokes)
+        
         time2 = timeit.default_timer()
         if res:
             logging.info('{0:s}: Processing {1:s} was successful within {2:.1f}m'.format(socket.gethostname(), time_start.isot, (time2-time1)/60.))
@@ -1831,14 +1758,18 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             logging.info('{0:s}: Warning!! Processing {1:s} took {2:.1f}m to complete. This node may be falling behind'.format(socket.gethostname(), time_start.isot, (time2-time1)/60.))
 
         time_start += TimeDelta(time_interval, format='sec')
-
+        
+        date_mjd = int(time_start.mjd)
+        if time_start.mjd - date_mjd < 4./24.:
+            date_synop = Time(time_start.mjd - 1., format='mjd').isot[:10]
+        else:
+            date_synop = Time(time_start.mjd, format='mjd').isot[:10]
+                
+        
+                
         if time_start > t_set:
             (t_rise_next, t_set_next) = sun_riseset(t_set + TimeDelta(6./24., format='jd'))
-            date_mjd = int(time_start.mjd)
-            if time_start.mjd - date_mjd < 4./24.:
-                date_synop = Time(time_start.mjd - 1., format='mjd').isot[:10]
-            else:
-                date_synop = Time(time_start.mjd, format='mjd').isot[:10]
+            
             
             # use last "worker" for daily refraction correction
             if do_daily_refracorr:
@@ -1850,7 +1781,12 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 else:
                     twait = t_rise_next - Time.now() 
                     logging.info('{0:s}: Sun is setting. Done for the day. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
-
+            if stokes=='I,Q,U,V':
+                print ("Doing leakage correction")
+                daily_leakage_correction(date_synop,save_dir=save_dir,overwrite=False, leakage_database=leakage_database,stokes=stokes)
+                
+            daily_beam_correction(date_synop, save_dir=savedir, overwrite=False,stokes=stokes)
+                
             if slowfast.lower() == 'fast':
                 twait += TimeDelta(600., format='sec') 
 
@@ -1940,7 +1876,7 @@ if __name__=='__main__':
     parser.add_argument('--no_refracorr', default=False, help='If set, do not do daily refraction correction', action='store_true')
     parser.add_argument('--slurm_kill_after_sunset', default=False, help='If set, kill all the processes with scancel after sunset', action='store_true')
     parser.add_argument('--use_jpl_ephem', default=False, help='If set, use JPL ephemeris for refraction correction', action='store_true')
-
+    parser.add_argument('--stokes', default='I', help='Which Stokes to process')
 
     args = parser.parse_args()
     sleep(int(args.sleep_time))
@@ -1974,7 +1910,7 @@ if __name__=='__main__':
             delete_working_fits=(not args.keep_working_fits), save_allsky=args.save_allsky, beam_fit_size=args.bmfit_sz, briggs=args.briggs,
             do_selfcal=do_selfcal, do_imaging=(not args.no_imaging), bands=args.bands, slowfast=args.slowfast, stop_at_sunset=(not args.nonstop),
             do_daily_refracorr=(not args.no_refracorr), slurm_kill_after_sunset=args.slurm_kill_after_sunset, 
-            save_selfcaltab=args.save_selfcaltab, actively_rm_ms=(not args.no_actively_rm_ms), use_jpl_ephem=args.use_jpl_ephem)
+            save_selfcaltab=args.save_selfcaltab, actively_rm_ms=(not args.no_actively_rm_ms), use_jpl_ephem=args.use_jpl_ephem, stokes=args.stokes)
     except Exception as e:
         logging.error(e)
         raise e
