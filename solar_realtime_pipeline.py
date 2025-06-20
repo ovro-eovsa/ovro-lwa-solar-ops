@@ -1226,11 +1226,12 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     fitsfiles.sort()
                     if stokes!='I':
                         allstokes_fits=combine_pol_images(fitsfiles,stokes)
-                        for fitsimages in allstokes_fits: 
-                            utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
+                        
                     else:
                         allstokes_fits=fitsfiles
-                    
+                        
+                    for fitsimages in allstokes_fits: 
+                        utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
                     
                     fits_images, plotted_image = compress_plot_images(allstokes_fits, btime, datedir, imagedir_allch_combined, hdf_dir, \
                                             fig_mfs_dir, stokes, fast_vis=fast_vis)
