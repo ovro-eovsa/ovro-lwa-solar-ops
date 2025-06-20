@@ -736,6 +736,7 @@ def correct_primary_beam_self_terms(imagename, pol='I'):
     
     
     meta, data = ndfits.read(imagename)
+    '''
     meta_header=meta['header']
     
     head=fits.getheader(imagename)
@@ -800,13 +801,13 @@ def correct_primary_beam_self_terms(imagename, pol='I'):
                     ## E stands for single precision float (32-bit). Change to D for double precision
                     ## see https://docs.astropy.org/en/stable/io/fits/usage/table.html#column-creation
             cols.append(fitscol)
-    
+    '''
     header={}
     header['beamcor']=True
             
-        
-    ndfits.update(imagename,new_data=data,new_columns=cols, new_header_entries=header)
-    print ("data and headers updated")
+    #ndfits.update(imagename,new_data=data,new_columns=cols, new_header_entries=header)
+    ndfits.update(imagename,new_data=data, new_header_entries=header)
+    logging.debug("data and headers updated in dummy primary beam correction area.")
         
 
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 
@@ -1479,7 +1480,7 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     ndfits.wrap(fitsfiles_fch, outfitsfile=fits_fch)
     
     
-    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs,apply_fiducial_primary_beam=True)
+    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs,apply_fiducial_primary_beam=False)
     figname_lv10 = os.path.basename(fits_mfs).replace('.fits', '.png')
     fig.savefig(fig_mfs_dir_sub_lv10 + '/' + figname_lv10)
     
