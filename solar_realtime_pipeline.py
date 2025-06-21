@@ -694,14 +694,18 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
                         fits_lv_all.append(f)
                 
                 for img in fits_lv_all:
+                
+                    with fits.open(img) as hdu:
+                    
+                        datetimestr=hdu[0].header['DATE-OBS']
+                        datedir_path=(Time(datetimestr).datetime).strftime("%Y/%m/%d/")
+                        
                     hdf_file=os.path.join(hdf_dir1,datedir_path,os.path.basename(img).replace('.fits','.hdf'))
                     if os.path.isfile(hdf_file):
                         continue
                     try:
                         correct_primary_beam_self_terms(img,pol=stokes)
-                        with fits.open(img) as hdu:
-                            datetimestr=hdu[0].header['DATE-OBS']
-                            datedir_path=(Time(datetimestr).datetime).strftime("%Y/%m/%d/")
+                        
                         
                         print (img,hdf_file)
                         utils.compress_fits_to_h5(img, hdf_file)
