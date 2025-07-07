@@ -2,10 +2,10 @@
 #SBATCH --job-name=solarpipedaily
 #SBATCH --partition=solar
 #SBATCH --ntasks=10
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=4
 #SBATCH --distribution=cyclic
 #SBATCH --nodelist=lwacalim[05-09]
-#SBATCH --mem=160G
+#SBATCH --mem=38G
 #SBATCH --time=16:00:00
 #SBATCH --output=/lustre/solarpipe/slurmlog/%j.out
 #SBATCH --error=/lustre/solarpipe/slurmlog/%j.err
@@ -17,11 +17,9 @@
 DIRSOFT=/lustre/peijin/ovro-lwa-solar-ops/
 DIRRUN=/lustre/peijin/testslurm/ # for no realtime test
 DIR_PY_ENV=/opt/devel/peijin/solarenv    #/opt/devel/bin.chen/envs/suncasa/
-#DIR_PY_ENV=/opt/devel/msurajit/envs/my_suncasa_env    #/opt/devel/bin.chen/envs/suncasa/
 CLEAR_CACHE_BEFORE_RUN=True
 
 source /home/solarpipe/.bashrc
-conda activate
 conda activate $DIR_PY_ENV
 
 # add DIRSOFT to the python path
@@ -35,22 +33,22 @@ if [ "$CLEAR_CACHE_BEFORE_RUN" = "True" ]; then
     rm -rf /dev/shm/srtmp/*
 fi
 
-#--bands 23MHz 27MHz 32MHz 36MHz 41MHz 46MHz 50MHz 55MHz 59MHz 64MHz 69MHz 73MHz 78MHz 82MHz \            
 # run according to the case:
 case "$1" in
     slow)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
         --briggs -0.5 --slowfast slow --interval 200 --delay 180 --save_allsky \
-        --no_refracorr --slurm_kill_after_sunset --keep_working_fits --save_selfcaltab
+        --no_refracorr --slurm_kill_after_sunset --keep_working_fits --save_selfcaltab --use_jpl_ephem
         ;;
     fast)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs 1.0 --slowfast fast --interval 3000 --delay 180
+            --briggs 1.0 --slowfast fast --interval 3000 --delay 180 --use_jpl_ephem
         ;;
     slownorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs -0.5 --slowfast slow --interval 100 --delay 180 --no_refracorr --alt_limit 0 \
-            --start_time 2025-05-11T14:30:00 --end_time 2025-05-12T01:30:00 --save_selfcaltab
+            --bands 23MHz 27MHz 32MHz 36MHz 41MHz 46MHz 50MHz 55MHz 59MHz 64MHz 69MHz 73MHz 78MHz 82MHz \
+            --briggs -0.0 --slowfast slow --interval 200 --delay 180 --no_refracorr --alt_limit 0 \
+            --start_time 2025-02-21T15:40:00 --end_time 2025-02-21T17:20:00 --save_selfcaltab --use_jpl_ephem
         ;;   
     slownorealtimecostumizeddir)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py  \
