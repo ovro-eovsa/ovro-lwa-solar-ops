@@ -389,7 +389,7 @@ def apply_crosshand_phase_on_caltables(caltables,crosshand_phase,crosshand_freqs
         if not inplace:
             copied_caltable=caltable+".crosshand"
             crosshand_applied[j]=copied_caltable
-            os.system("cp "+caltable+" "+copied_caltable)
+            os.system("cp -r "+caltable+" "+copied_caltable)
         else:
             crosshand_applied[j]=caltable
         beam_polcalib.combine_crosshand_theta_on_caltable(crosshand_applied[j],crosshand_phase,crosshand_freqs)
