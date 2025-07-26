@@ -94,8 +94,10 @@ def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
     except Exception as e:
         logging.error(e)
 
+    t_now = Time(date_mjd, format='mjd')
+
     obs = EarthLocation.of_site(observatory)
-    t0 = Time(int(date_mjd) + 13. / 24., format='mjd')
+    t0 = Time(int(date_mjd) + 8. / 24., format='mjd')
     
     sun_loc = get_body('sun', t0, location=obs)
     
@@ -104,18 +106,19 @@ def sun_riseset(date=Time.now(), observatory='ovro', altitude_limit=15.):
         t0 += TimeDelta(60., format='sec')
         alt = sun_loc.transform_to(AltAz(obstime=t0, location=obs)).alt.degree
 
-    t1 = Time(int(date_mjd) + 22. / 24., format='mjd')
+    t1 = Time(int(date_mjd) + 20. / 24., format='mjd')
     sun_loc = get_body('sun', t1, location=obs)
     alt = sun_loc.transform_to(AltAz(obstime=t1, location=obs)).alt.degree
     while alt > altitude_limit:
         t1 += TimeDelta(60., format='sec')
         alt = sun_loc.transform_to(AltAz(obstime=t1, location=obs)).alt.degree
 
+    if t_now < t1-TimeDelta(1., format='jd'):
+        # still before previous day sunset
+        t1 = t1 - TimeDelta(1., format='jd')
+        t0 = t0 - TimeDelta(1., format='jd')
+
     return t0, t1
-
-
-
-
 
 
         
@@ -163,9 +166,9 @@ def check_fast_ms(msname):
     return True
 
 
-def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=0, 
+def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=0, slowfast='slow',
                 num_apcal=1, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
-                flagdir=None, delete_allsky=False, actively_rm_ms=True, stokes='I'):
+                flagdir=None, delete_allsky=False, actively_rm_ms=True, stokes='I', manual_flagging_ants=None):
     
     try:
         msmd.open(msfile)
@@ -174,17 +177,31 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         return -1
 
     # do time average if the input ms file is fast visibility
-    if check_fast_ms(msfile):
-        omsfile = os.path.dirname(msfile) + '/' + os.path.basename(msfile).replace('.ms', '.10s.ms')
-        split(msfile, omsfile, datacolumn='data', timebin='10s')
-        os.system('rm -rf ' + msfile)
-        os.system('mv ' + omsfile + ' ' + msfile)
+    if slowfast == 'fast':
+        if check_fast_ms(msfile):
+            omsfile = os.path.dirname(msfile) + '/' + os.path.basename(msfile).replace('.ms', '.10s.ms')
+            split(msfile, omsfile, datacolumn='data', timebin='10s')
+            os.system('rm -rf ' + msfile)
+            os.system('mv ' + omsfile + ' ' + msfile)
 
-    msmd.open(msfile)
-    trange = msmd.timerangeforobs(0)
-    btime = qa.time(trange['begin']['m0'],form='fits')[0]
-    etime = qa.time(trange['end']['m0'],form='fits')[0]
-    msmd.close()
+    if manual_flagging_ants is not None:
+        # Flag the specified antennas
+        try:
+            flagdata(vis=msfile, mode='manual', antenna=manual_flagging_ants, action='apply')
+            logging.info(f"Manually flagged antennas: {manual_flagging_ants}")
+        except Exception as e:
+            logging.error(f"Error flagging antennas {manual_flagging_ants}: {e}")
+
+    
+    # var not used
+
+    #msmd.open(msfile)
+    #trange = msmd.timerangeforobs(0)
+    #btime = qa.time(trange['begin']['m0'],form='fits')[0]
+    #etime = qa.time(trange['end']['m0'],form='fits')[0]
+    #msmd.close()
+
+
     cfreqidx = os.path.basename(msfile).find('MHz') - 2
     cfreq = os.path.basename(msfile)[cfreqidx:cfreqidx+2]+'MHz'
     msfile_cal_ = [m for m in msfiles_cal if cfreq in m]
@@ -814,9 +831,9 @@ def correct_primary_beam_self_terms(imagename, pol='I'):
 def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=None, lustre=True, file_path='slow', 
             min_nband=6, nch_out=12, beam_fit_size=2, briggs=-0.5, stokes='I', do_selfcal=True, num_phase_cal=1, num_apcal=0, 
             overwrite_ms=False, delete_ms_slfcaled=False, logger_file=None, compress_fits=True,
-            proc_dir_mem = '/dev/shm/srtmp/', proc_dir = '/fast/solarpipe/realtime_pipeline/',
+            proc_dir_mem = '/dev/shm/srtmp/', proc_dir ='/dev/shm/srtmp/',# '/fast/solarpipe/realtime_pipeline/',
             save_dir = '/lustre/solarpipe/realtime_pipeline/',
-            calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables_latest/',
+            calib_dir = '/fast/solarpipe/caltables/',
             calib_file = '20240117_145752',
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6, save_selfcaltab=False,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
@@ -1583,7 +1600,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         proc_dir_mem = '/dev/shm/srtmp/', proc_dir = '/fast/solarpipe/realtime_pipeline/',
         proc_dir_isolation = True,
         save_dir = '/lustre/solarpipe/realtime_pipeline/',
-        calib_dir = '/lustre/solarpipe/realtime_pipeline/caltables_latest/',
+        calib_dir = '/fast/solarpipe/caltables/',
         calib_file = '20240117_145752', altitude_limit=10., 
         beam_fit_size = 2,
         briggs=-0.5,
@@ -1791,7 +1808,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 print ("Doing leakage correction")
                 daily_leakage_correction(date_synop,save_dir=save_dir,overwrite=False, leakage_database=leakage_database,stokes=stokes)
                 
-            daily_beam_correction(date_synop, save_dir=savedir, overwrite=False,stokes=stokes)
+            daily_beam_correction(date_synop, save_dir=save_dir, overwrite=False,stokes=stokes)
                 
             if slowfast.lower() == 'fast':
                 twait += TimeDelta(600., format='sec') 
@@ -1842,6 +1859,7 @@ if __name__=='__main__':
         pdsh -w lwacalim[00-09] 'rm -rf /dev/shm/srtmp/*' # clear ram disk
         pdsh -w lwacalim[00-09] 'pkill -u solarpipe -f wsclean'
         pdsh -w lwacalim[00-09] 'pkill -u solarpipe -f python'
+        pdsh -w lwacalim[00-09] 'find /dev/shm -maxdepth 1 -name "__KMP_REGISTERED_LIB*" -exec rm -f {} + 2>/dev/null'
     """
     parser = argparse.ArgumentParser(description='Solar realtime pipeline')
     parser.add_argument('--start_time', default=Time.now().isot, type=str, help='Timestamp for the start time. Format YYYY-MM-DDTHH:MM')
@@ -1853,9 +1871,10 @@ if __name__=='__main__':
     parser.add_argument('--nolustre', default=False, help='If set, do NOT assume that the data are stored under /lustre/pipeline/ in the default tree', action='store_true')
     parser.add_argument('--file_path', default='slow/', help='Specify where the raw data is located')
     parser.add_argument('--proc_dir_mem', default='/dev/shm/srtmp/' )# default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
+#    parser.add_argument('--proc_dir_mem', default='/fast/solarpipe/realtime_pipeline/proc/', help='Directory for processing')
     parser.add_argument('--proc_dir', default='/fast/solarpipe/realtime_pipeline/', help='Directory for processing')
     parser.add_argument('--save_dir', default='/lustre/solarpipe/realtime_pipeline/', help='Directory for saving fits files')
-    parser.add_argument('--calib_dir', default='/lustre/solarpipe/realtime_pipeline/caltables_latest/', help='Directory to calibration tables')
+    parser.add_argument('--calib_dir', default='/fast/solarpipe/caltables/', help='Directory to calibration tables')
     parser.add_argument('--calib_file', default='', help='Calibration file to be used yyyymmdd_hhmmss')
     parser.add_argument('--alt_limit', default=15., help='Lowest solar altitude to start/end imaging')
     parser.add_argument('--bmfit_sz', default=2, help='Beam fitting size to be passed to wsclean')
@@ -1868,7 +1887,7 @@ if __name__=='__main__':
     parser.add_argument('--keep_working_ms', default=False, help='If True, keep the working ms files after imaging', action='store_true')
     parser.add_argument('--keep_working_fits', default=False, help='If True, keep the working fits files after imaging', action='store_true')
     parser.add_argument('--save_allsky', default=False, help='If True, save the band-averaged all sky images', action='store_true')
-    parser.add_argument('--save_selfcaltab', default=True, help='If True, save the selfcalibration tables', action='store_true')
+    parser.add_argument('--save_selfcaltab', default=False, help='If True, save the selfcalibration tables', action='store_true')
     parser.add_argument('--no_selfcal', default=False, help='If set, do not do selfcal regardless slow or fast', action='store_true')
     parser.add_argument('--no_imaging', default=False, help='If set, do not perform imaging', action='store_true')
     parser.add_argument('--nonstop', default=False, help='If set, the script will be run without stopping', action='store_true')
