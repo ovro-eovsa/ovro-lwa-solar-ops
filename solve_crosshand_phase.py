@@ -21,20 +21,15 @@ img_pol=img_polcal(dynamic_spectrum=dynamic_spectrum,\
                     tim_mjds=tim_mjds,\
                     sky_coord=cygA_coord)
 
-img_pol.crosshand_phase_solver()
-
-crosshand_UV=img_pol.crosshand_theta ### obtained by matching both U and V
-
-plt.plot(img_pol.freqs,img_pol.crosshand_theta,'ro-',label='match U and V')
-
 img_pol.fit_UV=False
 
 img_pol.crosshand_phase_solver()
 
 crosshand_V=img_pol.crosshand_theta ### obtained by matching V
 
-plt.plot(img_pol.freqs,img_pol.crosshand_theta,'bs-',label='match V')
+np.savetxt("crosshand_phase.txt",np.array([img_pol.freqs,img_pol.crosshand_theta]).T)
 
+plt.plot(img_pol.freqs,img_pol.crosshand_theta,'bs-',label='match V')
 plt.xlabel("Frequency (MHz)")
 plt.ylabel("Crosshand phase (radian)")
 plt.savefig("crosshand_theta_variation.png")
@@ -45,6 +40,9 @@ plt.close()
 
 ### This is a bonus plot, which shows the direction independent leakage
 
+np.savetxt("DI_leakage.txt",np.array([img_pol.freqs,img_pol.leakage[0,:],\
+                                    img_pol.leakage[1,:],img_pol.leakage[2,:],\
+                                    img_pol.leakage[3,:]]).T)
 fig,ax=plt.subplots(nrows=1,ncols=3,figsize=[12,4],constrained_layout=True)
 for j,(ax1,stokes) in enumerate(zip(ax,['Q','U','V'])):
     ax1.plot(freqs,img_pol.leakage[j+1,:],'o-')
