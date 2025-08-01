@@ -1,3 +1,8 @@
+'''
+This code is primarily written by Prof. Dale Gary. Surajit Mondal
+used his template and added a new function called make_sdf, which 
+can be used to track an arbitrary ra-dec location.
+'''
 from astropy.coordinates import SkyCoord, EarthLocation, get_body, AltAz
 from astropy.time import Time
 import astropy.units as u
