@@ -6,10 +6,11 @@ import sys,os,glob,logging
 import data_downloader
 from casatools import table
 from ovrolwasolar import utils,flagging,calibration
-from casatools import msmetadata
-from casatasks import applycal
+from casatools import msmetadata, table
+from casatasks import applycal,ft,bandpass,flagdata,concat
 from ovrolwasolar import beam_polcalib,utils
 from ovrolwasolar.beam_polcalib import image_polcal_astronomical_source as img_polcal
+from ovrolwasolar.generate_calibrator_model import model_generation
 
 
 def source_riseset(skycoord, date_time,observatory='ovro', altitude_limit=15):
@@ -219,7 +220,9 @@ def find_delay_all_ant_corr(freqs,phase):
             delay[i,j]=find_delay(freqs,wrapped_phase)
     return delay
     
-def create_waterfall_plot(caltables,msnames,figname=None,num_chan=192,num_ant=352):
+def create_waterfall_plot(caltables,msnames,figname,num_chan=192,num_ant=352):
+    import matplotlib
+    matplotlib.use('Agg')  ### using non-interactive backend
     import matplotlib.pyplot as plt
     
     bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
@@ -601,7 +604,171 @@ def get_IQUV(msname,sky_coord):
     
     return stokes_data
     
+def get_phasecenter(msfile):
+    tb=table()
+    tb.open(os.path.join(msfile,"FIELD"))
+    try:
+        direction=tb.getcol("PHASE_DIR")
+    finally:
+        tb.close()
     
+    direction=direction.flatten()
+    coord=SkyCoord(direction[0]*u.rad,direction[1]*u.rad,frame='icrs')
+    hms=coord.ra.hms
+    dms=coord.dec.dms
+    ra_hms=str(int(hms[0]))+"h"+str(int(hms[1]))+"m"+str(round(hms[2],4))+"s"
+    dec_dms=str(int(dms[0]))+"d"+str(int(dms[1]))+"m"+str(round(dms[2],2))+"s"
+    return ra_hms,dec_dms
+
+def concat_issue_fieldid(msfile,obsid=False):
+    tb=table()
+    tb.open(msfile,nomodify=False)
+    try:
+        fid     = tb.getcol('FIELD_ID')
+        fidnew  = np.zeros(fid.shape,dtype=int)
+        tb.putcol('FIELD_ID', fidnew)
+        if obsid:
+            oid    = tb.getcol('OBSERVATION_ID')
+            oidnew = np.zeros(oid.shape,dtype=int)
+            tb.putcol('OBSERVATION_ID', oidnew)
+    finally:
+        tb.close()
+        
+def gen_multitime_caltable(starttime, endtime, refant='202',uvrange='>10lambda,<150lambda',\
+                            workdir=None,\
+                            bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
+                                    '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
+                                    '78MHz', '82MHz'],\
+                             caltable_dir=None,\
+                             beam_caltable_dir=None,\
+                             flag_outrigger_antenna=True,\
+                             create_waterfall_plot=True,\
+                             figname='caltable_waterfall.pdf'
+                             ):
+        
+    '''
+    :param starttime: Astropy time object specifying the starttime of calibration
+    :param endtime: Astropy time object specifying endtime
+    :param workdir: Working directory. All MSfiles will be stored here, with a folder for 
+                    each frequency band. Deafult is current directory.
+    :param bands: Frequency bands for which caltables should be generated. Default is all bands.
+                    Bands should be in the standard OVRO-LWA bands.
+    :param caltable_dir : The location where standard imaging caltables will be stored. If not provided
+                            defaults to caltables in workdir
+    :param beam_caltable_dir: The location where caltables will be stored after outrigger antennas are flagged.
+                             If not provided defaults to caltables_beam in workdir
+    :param flag_outrigger_antenna: If True, outrigger antennas are flagged and placed in beam_caltable_dir
+                                    Default is True
+    :param create_waterfall_plot: If True, creates a waterfall plot using the caltables generated. Note
+                                  that the imaging caltables will be used.
+    :param figname: If not provided, the figure will be saved in workdir in a file named caltable_waterfall.pdf
+                    Note that a non-interactive backend is used for this figure.
+    '''
+    
+    
+    if not workdir:
+        workdir=os.getcwd()
+    
+    if not caltable_dir:
+        caltable_dir=os.path.join(workdir,'caltables')
+    
+    if not beam_caltable_dir:
+        beam_caltable_dir=os.path.join(workdir,'caltables_beam')
+        
+    if not os.path.isdir(caltable_dir):
+        os.mkdirs(caltable_dir)
+    
+    if not os.path.isdir(beam_caltable_dir):
+        os.mkdirs(beam_caltable_dir)
+    
+    
+    bcaltbs=[]
+    bcaltbs_bm=[]
+    msnames=[]
+    
+    for band in bands:
+        print ("Working on "+band)
+        
+        try:
+            files=[]
+            
+            copydir=os.path.join(workdir,band)
+            if not os.path.isdir(copydir):
+                os.mkdir(copydir)
+
+            os.chdir(copydir)
+            data_downloader.download_timerange(starttime,endtime,download_interval='10s',destination=copydir,bands=[band])
+            #msfiles=glob.glob(os.path.join(basedir,band,'2025-07-07/08/*.ms'))
+            msfiles=glob.glob(os.path.join(copydir,band,'*.ms'))
+            msfiles.sort()
+            for j,msfile in enumerate(msfiles):
+                #os.system("cp -r "+msfile+" ./")
+                msname=os.path.basename(msfile)
+                flagging.flag_bad_ants(msname)
+                if j==0:
+                    ra_center,dec_center=get_phasecenter(msname)
+                    phase_str=ra_center+" "+dec_center
+                    ms_str=msname+".concatted"
+                
+                os.system("chgcentre "+msname+" "+phase_str)
+                files.append(msname)
+            
+            concat(files,concatvis=ms_str)
+            concat_issue_fieldid(ms_str, obsid=True)
+            for file1 in files:
+                os.system("rm -rf "+file1)
+                
+            md=model_generation(vis=ms_str,separate_pol=True)
+            modelcl,ft_needed=md.gen_model_cl()
+
+            print ("Sky model generated")
+
+            bcaltb=os.path.join(caltable_dir,os.path.basename(ms_str).replace('.ms','.bcal'))
+            
+            #clearcal(ms_str, addmodel=True)
+            ft(ms_str, complist=modelcl, usescratch=True)
+
+            print ("Model prediction over")
+            
+            
+            bandpass(ms_str, caltable=bcaltb, uvrange=uvrange, combine='scan,field,obs', fillgaps=0,refant=refant)
+            ### I am using minsnr=1, since the snr calculation of CASA strictly speaking, is valid only for point source
+            #flagdata(vis=bcaltb,mode='tfcrop') ### flagging the caltable
+            print ("Bandpass solutions computed")
+
+            logging.debug("Applying the bandpass solutions")
+            applycal(vis=ms_str, gaintable=bcaltb)
+            logging.debug("Doing a rflag run on corrected data")
+            print ("Flagging corrected data")
+            flagdata(vis=ms_str, mode='rflag', datacolumn='corrected')
+
+            bandpass(ms_str, caltable=bcaltb, uvrange=uvrange, combine='scan,field,obs', fillgaps=0,refant=refant)
+            
+            bcaltbs.append(bcaltb)
+            msnames.append(ms_str)
+            
+            if flag_outrigger_antenna:
+                bcaltb_bm = os.path.join(beam_caltable_dir,os.path.basename(bcaltb))
+                os.system('cp -r ' + bcaltb + ' ' + bcaltb_bm)
+                flag_outrigger(bcaltb_bm,ms_str)
+                bcaltbs_bm.append(bcaltb_bm)
+
+        except:
+            pass
+        os.chdir(workdir) 
+    
+    if create_waterfall_plot:
+        if not figname:
+            figname='caltable_waterfall.pdf'
+        create_waterfall_plot(bcaltbs,msnames,figname=figname):
+    if flag_outrigger_antenna:
+        return bcaltbs, bcaltbs_bm
+    
+    else:
+        return bcaltbs
+        
+
+
             
         
         
