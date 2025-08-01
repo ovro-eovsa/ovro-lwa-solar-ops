@@ -84,9 +84,9 @@ def make_solar_sdf(trange=None):
     # Create a template file using "lwaobserving" create command
     blah = subprocess.run(["lwaobserving","create-sdf","--n-obs","1","--sess-mode","POWER","--beam-num","2",
        "--obs-mode","TRK_SOL", "--obs-start", trange[0].isot[:19],"--obs-dur","1800000","--obj-name","sun",
-       "--int-time","64","/tmp/template.sdf"],stdout = subprocess.PIPE)
+       "--int-time","64","/lustre/solarpipe/solar_beam_sdfs/template.sdf"],stdout = subprocess.PIPE)
     output = blah.stdout.decode('utf-8').split('\n')
-    f = open("/tmp/template.sdf",'r')
+    f = open("/lustre/solarpipe/solar_beam_sdfs/template.sdf",'r')
     lines = f.readlines()
     f.close()
     hdr_block = lines[:11]
@@ -94,7 +94,7 @@ def make_solar_sdf(trange=None):
     obs_block.append('\n')   # Add a blank link to separate sections
     alt_block = copy(obs_block)  # Off Sun pointing block
     alt_block = alt_block[1:]    # Shift lines up one line to eliminate OBS_TARGET for offsun
-    sdf_name = '/tmp/solar_'+trange[0].iso[:19].replace('-','').replace(':','').replace(' ','_')+'.sdf'
+    sdf_name = '/lustre/solarpipe/solar_beam_sdfs/solar_'+trange[0].iso[:19].replace('-','').replace(':','').replace(' ','_')+'.sdf'
     f = open(sdf_name,'w')
     fmt_changed = False  # Flag to indicate that the schedule file format has changed (error condition)
     if 'CONFIG_FILE' in hdr_block[7]:
