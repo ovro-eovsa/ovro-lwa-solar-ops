@@ -334,8 +334,15 @@ def flag_outrigger(dataset, ref_ms):
     return
 
 def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir='./',\
-                            model_beam_file='/lustre/msurajit/beam_model_nivedita/OVRO-LWA_soil_pt.h5',\
+                            model_beam_file='/lustre/msurajit/beam_model_nivedita/OVRO-LWA_MROsoil_updatedheight.h5',\
                             caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_latest',\
+                            doplot=True,leakage_figname='DI_leakage_variation.png',\
+                            crosshand_figname='crosshand_theta_variation.png',\
+                            doapply=False,\
+                            bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
+                                    '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
+                                    '78MHz', '82MHz']\
+                            database=None,overwrite_db=False,
                             ):
     '''
     This function is the wrapper function for determining the
@@ -357,34 +364,114 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
     :param freq_avg: Number of channels to average
     :type freq_avg: int
     '''
+    import matplotlib
+    matplotlib.use('Agg')  ### using non-interactive backend
+    import matplotlib.pyplot as plt
+    
     dynamic_spectrum,freqs,tim_mjds=get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir=proc_dir,\
-                                    caltable_folder=caltable_folder,model_beam_file=model_beam_file, freq_avg=freq_avg)
+                                    caltable_folder=caltable_folder,model_beam_file=model_beam_file, freq_avg=freq_avg,\
+                                    bands=bands)
     
     img_pol=img_polcal(dynamic_spectrum=dynamic_spectrum,\
                     freqs=freqs,\
                     tim_mjds=mjds,\
                     sky_coord=sky_coord)
+    img_pol.fit_UV=False
                     
     img_pol.crosshand_phase_solver()
     
-    fig,ax=plt.subplots(nrows=1,ncols=3,figsize=[12,4],constrained_layout=True)
-    for j,(ax1,stokes) in enumerate(zip(ax,['Q','U','V'])):
-        ax1.plot(freqs,img_pol.leakage[j+1,:],'o-')
-        ax1.set_ylabel(stokes+" leakage fraction")
-        ax1.set_ylim([-0.2,0.2])
-    fig.supxlabel("Frequency (MHz)")
-    plt.savefig("DI_leakage_variation.png")
-    plt.close()
+    if doplot:
+        fig,ax=plt.subplots(nrows=1,ncols=3,figsize=[12,4],constrained_layout=True)
+        for j,(ax1,stokes) in enumerate(zip(ax,['Q','U','V'])):
+            ax1.plot(freqs,img_pol.leakage[j+1,:],'o-')
+            ax1.set_ylabel(stokes+" leakage fraction")
+            ax1.set_ylim([-0.2,0.2])
+        fig.supxlabel("Frequency (MHz)")
+        plt.savefig(leakage_figname)
+        plt.close()
+        
+        plt.plot(img_pol.freqs,img_pol.crosshand_theta,'o-')
+        plt.xlabel("Frequency (MHz)")
+        plt.ylabel("Crosshand phase (radian)")
+        plt.savefig(crosshand_figname)
+        plt.close()
     
-    plt.plot(img_pol.freqs,img_pol.crosshand_theta,'o-')
-    plt.xlabel("Frequency (MHz)")
-    plt.ylabel("Crosshand phase (radian)")
-    plt.savefig("crosshand_theta_variation.png")
-    plt.close()
+    if doapply:
+        if not database:
+            raise RuntimeError("database is not provided. The crosshand phase correction will not be applied.")
+        if type(database)!=str:
+            raise RuntimeError("Database should be a string. A file of that name will be created, if it does not exist")
+            
+        for band in bands:
+            caltables=glob.glob(os.path.join(caltable_folder,caltable_prefix+"*"+band+"*.bcal"))
+            
+            if len(caltables)==0:
+                logging.info(f"No caltable found for band {band}")   
+                continue
+            
+            if len(caltables)>1:
+                logging.warning(f"More than one caltable found for the frequency band {band}. Correcting all")
+            
+            db_key=starttime.isot[:10].replace('-','')
+            apply_crosshand_phase_on_caltables(caltables,img_pol.crosshand_theta,\
+                                                img_pol.freqs,\
+                                                db_key,\
+                                                inplace=True)
+            
+            write_to_database(img_pol.freqs,img_pol.crosshand_theta,img_pol.leakage, db_key,database)           
+                
+                
     
-    return img_pol.freqs,img_pol.crosshand_theta
+    return img_pol.freqs,img_pol.crosshand_theta, img_pol.leakage,\
+            leakage_figname,crosshand_figname
+
+def write_to_database(freqs,crosshand_theta,leakage,db_key,database,overwrite=False):
+    '''
+        This code will write the determined crosshand phase to the database. It
+        will not overwrite by default. It will create a group with name
+        ymd. For example, if the user has used data from 2024/12/09, the group
+        name will be 20241209. Under that group, three datasets will be created:
+        a)crosshand_phase b)freqs c)leakage
+        '''
+        
+        
+            
+        pos=np.where(np.isnan(crosshand_theta)==True)
+        crosshand_theta[pos]=1e3
+        
+        pos=np.where(np.isnan(leakage)==True)
+        leakage[pos]=1e3
+        
+        if not os.path.isfile(database):
+            hfdb=h5py.File(database,'w')
+        else:
+            hfdb=h5py.File(database,'a')
+        try:
+            key=db_key
+            print (key)
+            if key in hfdb.keys():
+                logging.warning("Time key already exists")
+                if not overwrite:
+                    return
+            else:
+                logging.info("Creating new time group")
+                hfdb.create_group(key)
+                
+            hf_time=hfdb[key]
+            hf_time.create_dataset('crosshand_phase',data=crosshand_theta)
+            hf_time.create_dataset('freqs',data=freqs)
+            hf.create_dataset('DI_leakage',data=leakage[1:,:])
+            logging.debug("Successfully updated database.")
+        finally:
+            hfdb.close()
+        self.crosshand_theta[pos]=np.nan
     
-def apply_crosshand_phase_on_caltables(caltables,crosshand_phase,crosshand_freqs,inplace=False):
+def apply_crosshand_phase_on_caltables(caltables,crosshand_phase,crosshand_freqs,crosshand_timestr,inplace=False):
+    '''
+    :param crosshand_timestr: This is the date whose data has been used to solve for the crosshand phase.
+                                Strict formatting is enforced. The format should be YYYYMMDD
+    
+    '''
     
     crosshand_applied=[None]*len(caltables)
     
@@ -395,15 +482,19 @@ def apply_crosshand_phase_on_caltables(caltables,crosshand_phase,crosshand_freqs
             os.system("cp "+caltable+" "+copied_caltable)
         else:
             crosshand_applied[j]=caltable
-        beam_polcalib.combine_crosshand_theta_on_caltable(crosshand_applied[j],crosshand_phase,crosshand_freqs)
-    
+        crosshand_phase_applied=get_keyword(msname,"crosshand_db_key")
+        if not crosshand_phase_applied:
+            beam_polcalib.combine_crosshand_theta_on_caltable(crosshand_applied[j],crosshand_phase,crosshand_freqs)
+            put_keyword(caltable,"crosshand_db_key",crosshand_timestr)
+        else:
+            logging.error("Crosshand phase is already applied. Will not apply again.")
     return  crosshand_applied         
         
 def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
                      bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
                     '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
                     '78MHz', '82MHz'],caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_latest',\
-                    freq_avg=16):
+                    caltable_prefix='',freq_avg=16):
     '''
     This function will produce the dynamic spectrum of the source. It will also do this
     after flagging outrigger. Then it will phase up to the sky_coord supplied. Then it
@@ -428,7 +519,6 @@ def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
     :type proc_dir: str
     '''
     
-            
     
     num_bands=len(bands)
     
@@ -448,13 +538,15 @@ def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
         os.makedirs(download_fold)
     
     while st.mjd<=end_mjd:
-        msfiles=data_downloader.download_calibms(st,download_fold=download_fold)
+        msfiles=data_downloader.download_calibms(st,download_fold=download_fold, bands=bands)
         flag_ms(msfiles)
         
         if len(msfiles)==num_bands:
-            stokes_data,freqs=get_source_spectrum_single_time(msfiles,sky_coord,caltable_folder=caltable_folder)
+            stokes_data,freqs=get_source_spectrum_single_time(msfiles,sky_coord,caltable_prefix=caltable_prefix,\
+                                                                caltable_folder=caltable_folder)
         else:
-            stokes_data,_=get_source_spectrum_single_time(msfiles,sky_coord,caltable_folder=caltable_folder)
+            stokes_data,_=get_source_spectrum_single_time(msfiles,sky_coord,caltable_prefix=caltable_prefix,\
+                                                            caltable_folder=caltable_folder)
         dynamic_spectrum.append(stokes_data)
         mjds.append(st.mjd)
         st+=tdt
@@ -479,30 +571,18 @@ def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
     return np.swapaxes(DS_freq_avged,1,2),freqs_avged,mjds ## freqs in MHz
             
             
-def get_source_spectrum_single_time(msfiles,sky_coord,caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_latest'):
+def get_source_spectrum_single_time(msfiles,sky_coord,caltable_prefix,\
+                                    caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_latest',\
+                                    bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
+                                            '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
+                                            '78MHz', '82MHz']):
     
-    bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
-            '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
-            '78MHz', '82MHz']
+    
             
     
     num_bands=len(bands)
     
-    ms_freqs_str=[]
     
-    
-    msfiles.sort()
-    
-    
-    num_msfiles=len(msfiles)
-    
-    for j,msname in enumerate(msfiles):
-        ms_freqs_str.append(utils.get_freqstr_from_name(msname))
-
-    ms_freqs=np.zeros(num_msfiles)
-    for j,msname in enumerate(msfiles):
-        frequencies=utils.get_caltable_freq(msname)[0]/1e6 ### converting to MHz
-        ms_freqs[j]=frequencies
         
     msmd=msmetadata()
     msmd.open(msfiles[0])
@@ -516,39 +596,24 @@ def get_source_spectrum_single_time(msfiles,sky_coord,caltable_folder='/lustre/s
     stokes_data=np.zeros((4,num_bands*num_chan))
     freqs=np.zeros((num_bands*num_chan))
     
-        
-    j=0   
-    for k,band in enumerate(bands):
-        if j>len(ms_freqs_str)-1:
-            logging.info("MS file for "+band+" is missing or bandpass caltable was not present")
-            print ("MS file for "+band+" is missing or bandpass caltable was not present")
-            stokes_data[:,k*num_chan:(k+1)*num_chan]=np.nan
-            freqs[k*num_chan:(k+1)*num_chan]=np.nan
-            continue    
-            
-        caltables=glob.glob(os.path.join(caltable_folder,"*"+ms_freqs_str[j]+"*.bcal"))
-        
-        if band!=ms_freqs_str[j] or len(caltables)==0:
-            logging.info("MS file for "+band+" is missing or bandpass caltable was not present")
-            print ("MS file for "+band+" is missing or bandpass caltable was not present")
-            stokes_data[:,k*num_chan:(k+1)*num_chan]=np.nan
-            freqs[k*num_chan:(k+1)*num_chan]=np.nan
-            continue    
-        msname=msfiles[j]
-        ms_freq_MHz=int(ms_freqs_str[j].split('MHz')[0])
-        ind=np.argmin(abs(ms_freq_MHz-ms_freqs))
-        if abs(ms_freq_MHz-ms_freqs[ind])>2:
-            logging.info("Freq index not found. Some MSfiles are missing")
-            print ("Freq index not found. Some MSfiles are missing, ",ms_freq_MHz)
-            stokes_data[:,k*num_chan:(k+1)*num_chan]=np.nan
-            freqs[k*num_chan:(k+1)*num_chan]=np.nan
-            continue
-        else:    
-            
+    
+    for k, band in enumerate(bands):
+        caltables=glob.glob(os.path.join(caltable_folder,caltable_prefix+"*"+band+"*.bcal"))
+        ms_found=False
+        for msfile in msfiles:
+            if band in msfile:
+                ms_found=True
+                break  #### It can only have 1 MS of given band in a given time.
+        if ms_found:
             applycal(msname,gaintable=caltables[0])
-            stokes_data[:,k*num_chan:(k+1)*num_chan]=get_IQUV(msname,sky_coord)                                                            
-            freqs[k*num_chan:(k+1)*num_chan]=utils.get_caltable_freq(msname)*1e-6 #### converting to MHz
-        j+=1
+            stokes_data[:,k*num_chan:(k+1)*num_chan]=get_IQUV(msname,sky_coord)    
+            freqs[k*num_chan:(k+1)*num_chan]=utils.get_caltable_freq(msname)*1e-6 #### converting to MHz  
+        else:
+            logging.info("Freq index not found. Some MSfiles are missing")
+            print ("Freq index not found. Some MSfiles are missing, ",band)
+            stokes_data[:,k*num_chan:(k+1)*num_chan]=np.nan
+            freqs[k*num_chan:(k+1)*num_chan]=np.nan
+            
     return stokes_data,freqs
     
 def get_baseline_index(ant_id1, ant_id2,num_ant=352,auto_corr=True):
@@ -642,7 +707,7 @@ def gen_multitime_caltable(starttime, endtime, refant='202',uvrange='>10lambda,<
                              caltable_dir=None,\
                              beam_caltable_dir=None,\
                              flag_outrigger_antenna=True,\
-                             create_waterfall_plot=True,\
+                             make_waterfall_plot=True,\
                              figname='caltable_waterfall.pdf'
                              ):
         
@@ -676,10 +741,10 @@ def gen_multitime_caltable(starttime, endtime, refant='202',uvrange='>10lambda,<
         beam_caltable_dir=os.path.join(workdir,'caltables_beam')
         
     if not os.path.isdir(caltable_dir):
-        os.mkdirs(caltable_dir)
+        os.makedirs(caltable_dir)
     
     if not os.path.isdir(beam_caltable_dir):
-        os.mkdirs(beam_caltable_dir)
+        os.makedirs(beam_caltable_dir)
     
     
     bcaltbs=[]
@@ -699,7 +764,8 @@ def gen_multitime_caltable(starttime, endtime, refant='202',uvrange='>10lambda,<
             os.chdir(copydir)
             data_downloader.download_timerange(starttime,endtime,download_interval='10s',destination=copydir,bands=[band])
             #msfiles=glob.glob(os.path.join(basedir,band,'2025-07-07/08/*.ms'))
-            msfiles=glob.glob(os.path.join(copydir,band,'*.ms'))
+            
+            msfiles=glob.glob(os.path.join(copydir,'*.ms'))
             msfiles.sort()
             for j,msfile in enumerate(msfiles):
                 #os.system("cp -r "+msfile+" ./")
@@ -723,7 +789,7 @@ def gen_multitime_caltable(starttime, endtime, refant='202',uvrange='>10lambda,<
 
             print ("Sky model generated")
 
-            bcaltb=os.path.join(caltable_dir,os.path.basename(ms_str).replace('.ms','.bcal'))
+            bcaltb=os.path.join(caltable_dir,os.path.basename(ms_str).replace('.ms.concatted','.bcal'))
             
             #clearcal(ms_str, addmodel=True)
             ft(ms_str, complist=modelcl, usescratch=True)
@@ -753,14 +819,14 @@ def gen_multitime_caltable(starttime, endtime, refant='202',uvrange='>10lambda,<
                 flag_outrigger(bcaltb_bm,ms_str)
                 bcaltbs_bm.append(bcaltb_bm)
 
-        except:
-            pass
+        except Exception as e:
+            raise e
         os.chdir(workdir) 
     
-    if create_waterfall_plot:
+    if make_waterfall_plot:
         if not figname:
             figname='caltable_waterfall.pdf'
-        create_waterfall_plot(bcaltbs,msnames,figname=figname):
+        create_waterfall_plot(bcaltbs,msnames,figname=figname)
     if flag_outrigger_antenna:
         return bcaltbs, bcaltbs_bm
     
