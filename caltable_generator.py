@@ -336,12 +336,13 @@ def flag_outrigger(dataset, ref_ms):
 def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir='./',\
                             model_beam_file='/lustre/msurajit/beam_model_nivedita/OVRO-LWA_MROsoil_updatedheight.h5',\
                             caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_latest',\
+                            caltable_prefix='',\
                             doplot=True,leakage_figname='DI_leakage_variation.png',\
                             crosshand_figname='crosshand_theta_variation.png',\
                             doapply=False,\
                             bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
                                     '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
-                                    '78MHz', '82MHz']\
+                                    '78MHz', '82MHz'],\
                             database=None,overwrite_db=False,
                             ):
     '''
@@ -369,14 +370,15 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
     import matplotlib.pyplot as plt
     
     dynamic_spectrum,freqs,tim_mjds=get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir=proc_dir,\
-                                    caltable_folder=caltable_folder,model_beam_file=model_beam_file, freq_avg=freq_avg,\
-                                    bands=bands)
+                                    caltable_folder=caltable_folder, freq_avg=freq_avg,\
+                                    bands=bands,caltable_prefix=caltable_prefix)
     
     img_pol=img_polcal(dynamic_spectrum=dynamic_spectrum,\
                     freqs=freqs,\
-                    tim_mjds=mjds,\
+                    tim_mjds=tim_mjds,\
                     sky_coord=sky_coord)
     img_pol.fit_UV=False
+    img_pol.model_beam_file=model_beam_file
                     
     img_pol.crosshand_phase_solver()
     
@@ -427,44 +429,44 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
 
 def write_to_database(freqs,crosshand_theta,leakage,db_key,database,overwrite=False):
     '''
-        This code will write the determined crosshand phase to the database. It
-        will not overwrite by default. It will create a group with name
-        ymd. For example, if the user has used data from 2024/12/09, the group
-        name will be 20241209. Under that group, three datasets will be created:
-        a)crosshand_phase b)freqs c)leakage
-        '''
+    This code will write the determined crosshand phase to the database. It
+    will not overwrite by default. It will create a group with name
+    ymd. For example, if the user has used data from 2024/12/09, the group
+    name will be 20241209. Under that group, three datasets will be created:
+    a)crosshand_phase b)freqs c)leakage
+    '''
+    
+    
         
-        
-            
-        pos=np.where(np.isnan(crosshand_theta)==True)
-        crosshand_theta[pos]=1e3
-        
-        pos=np.where(np.isnan(leakage)==True)
-        leakage[pos]=1e3
-        
-        if not os.path.isfile(database):
-            hfdb=h5py.File(database,'w')
+    pos=np.where(np.isnan(crosshand_theta)==True)
+    crosshand_theta[pos]=1e3
+    
+    pos=np.where(np.isnan(leakage)==True)
+    leakage[pos]=1e3
+    
+    if not os.path.isfile(database):
+        hfdb=h5py.File(database,'w')
+    else:
+        hfdb=h5py.File(database,'a')
+    try:
+        key=db_key
+        print (key)
+        if key in hfdb.keys():
+            logging.warning("Time key already exists")
+            if not overwrite:
+                return
         else:
-            hfdb=h5py.File(database,'a')
-        try:
-            key=db_key
-            print (key)
-            if key in hfdb.keys():
-                logging.warning("Time key already exists")
-                if not overwrite:
-                    return
-            else:
-                logging.info("Creating new time group")
-                hfdb.create_group(key)
-                
-            hf_time=hfdb[key]
-            hf_time.create_dataset('crosshand_phase',data=crosshand_theta)
-            hf_time.create_dataset('freqs',data=freqs)
-            hf.create_dataset('DI_leakage',data=leakage[1:,:])
-            logging.debug("Successfully updated database.")
-        finally:
-            hfdb.close()
-        self.crosshand_theta[pos]=np.nan
+            logging.info("Creating new time group")
+            hfdb.create_group(key)
+            
+        hf_time=hfdb[key]
+        hf_time.create_dataset('crosshand_phase',data=crosshand_theta)
+        hf_time.create_dataset('freqs',data=freqs)
+        hf.create_dataset('DI_leakage',data=leakage[1:,:])
+        logging.debug("Successfully updated database.")
+    finally:
+        hfdb.close()
+    self.crosshand_theta[pos]=np.nan
     
 def apply_crosshand_phase_on_caltables(caltables,crosshand_phase,crosshand_freqs,crosshand_timestr,inplace=False):
     '''
@@ -519,6 +521,7 @@ def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
     :type proc_dir: str
     '''
     
+    import matplotlib.pyplot as plt
     
     num_bands=len(bands)
     
@@ -543,10 +546,12 @@ def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
         
         if len(msfiles)==num_bands:
             stokes_data,freqs=get_source_spectrum_single_time(msfiles,sky_coord,caltable_prefix=caltable_prefix,\
-                                                                caltable_folder=caltable_folder)
+                                                                caltable_folder=caltable_folder, bands=bands)
         else:
             stokes_data,_=get_source_spectrum_single_time(msfiles,sky_coord,caltable_prefix=caltable_prefix,\
-                                                            caltable_folder=caltable_folder)
+                                                            caltable_folder=caltable_folder, bands=bands)
+        
+        
         dynamic_spectrum.append(stokes_data)
         mjds.append(st.mjd)
         st+=tdt
@@ -557,6 +562,9 @@ def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
     mjds=np.array(mjds)
     
     DS=np.swapaxes(concat_ds,1,2) ### now frequency in axis=2
+    
+    
+    
     shape=DS.shape
     num_chan=shape[2]
     num_times=shape[1]
@@ -567,6 +575,8 @@ def get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir='./',\
     DS_freq_avged=np.nanmean(DS_reshaped,axis=3)
     freqs_reshaped=freqs[:num_chan].reshape((num_chan//freq_avg,freq_avg))
     freqs_avged=np.nanmean(freqs_reshaped,axis=1)
+    
+   
     
     return np.swapaxes(DS_freq_avged,1,2),freqs_avged,mjds ## freqs in MHz
             
@@ -600,8 +610,8 @@ def get_source_spectrum_single_time(msfiles,sky_coord,caltable_prefix,\
     for k, band in enumerate(bands):
         caltables=glob.glob(os.path.join(caltable_folder,caltable_prefix+"*"+band+"*.bcal"))
         ms_found=False
-        for msfile in msfiles:
-            if band in msfile:
+        for msname in msfiles:
+            if band in msname:
                 ms_found=True
                 break  #### It can only have 1 MS of given band in a given time.
         if ms_found:
