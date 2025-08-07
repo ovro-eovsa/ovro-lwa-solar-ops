@@ -84,7 +84,7 @@ def make_solar_sdf(trange=None):
     # Create a template file using "lwaobserving" create command
     blah = subprocess.run(["lwaobserving","create-sdf","--n-obs","1","--sess-mode","POWER","--beam-num","2",
        "--obs-mode","TRK_SOL", "--obs-start", trange[0].isot[:19],"--obs-dur","1800000","--obj-name","sun",
-       "--int-time","64","/lustre/solarpipe/solar_beam_sdfs/template.sdf"],stdout = subprocess.PIPE)
+       "--int-time","64","--do-cal","/lustre/solarpipe/solar_beam_sdfs/template.sdf"],stdout = subprocess.PIPE)
     output = blah.stdout.decode('utf-8').split('\n')
     f = open("/lustre/solarpipe/solar_beam_sdfs/template.sdf",'r')
     lines = f.readlines()
@@ -238,7 +238,7 @@ def make_sdf(source_coord,trange,beam_to_use=5, scan_duration=1800,source_name='
     blah = subprocess.run(["lwaobserving","create-sdf","--n-obs","1","--sess-mode","POWER","--beam-num",str(beam_to_use),\
         "--obs-mode","TRK_RADEC", "--ra", str(source_ra), "--dec", str(source_dec),"--obs-start", trange[0].isot[:19],\
         "--obs-dur",str(int(scan_duration*1000)),\
-        "--obj-name",source_name,"--int-time",str(integration_time),sdf_filename],stdout = subprocess.PIPE)
+        "--obj-name",source_name,"--do-cal","--int-time",str(integration_time),sdf_filename],stdout = subprocess.PIPE)
     output = blah.stdout.decode('utf-8').split('\n')
     f = open(sdf_filename,'r')
     lines = f.readlines()
