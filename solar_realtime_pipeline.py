@@ -1698,7 +1698,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
             # attribute the task_id as node number 
             nodenum = task_id
             nnode = task_count
-            nodes_list=[int(n) for n in list(taskids)]
+            nodes_list= [int(n) for n in range(nnode)]
 
         else:
             # pdsh way, using hostname to manage
