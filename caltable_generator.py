@@ -337,6 +337,7 @@ def flag_outrigger(dataset, ref_ms):
 def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir='./',\
                             model_beam_file='/lustre/msurajit/beam_model_nivedita/OVRO-LWA_MROsoil_updatedheight.h5',\
                             caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_latest',\
+                            beam_caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_beam_latest',\
                             caltable_prefix='',\
                             doplot=True,leakage_figname='DI_leakage_variation.png',\
                             crosshand_figname='crosshand_theta_variation.png',\
@@ -404,7 +405,11 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
             raise RuntimeError("database is not provided. The crosshand phase correction will not be applied.")
         if type(database)!=str:
             raise RuntimeError("Database should be a string. A file of that name will be created, if it does not exist")
-            
+        
+        db_key=starttime[:10].replace('-','')
+        write_to_database(img_pol.freqs,img_pol.crosshand_theta,img_pol.leakage, db_key,database)   
+        
+        tables=[]    
         for band in bands:
             caltables=glob.glob(os.path.join(caltable_folder,caltable_prefix+"*"+band+"*.bcal"))
             
@@ -414,19 +419,35 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
             
             if len(caltables)>1:
                 logging.warning(f"More than one caltable found for the frequency band {band}. Correcting all")
+            tables+=caltables
+                                                
+        
+        for band in bands:
+            caltables=glob.glob(os.path.join(beam_caltable_folder,caltable_prefix+"*"+band+"*.bcal"))
             
-            db_key=starttime[:10].replace('-','')
-            apply_crosshand_phase_on_caltables(caltables,img_pol.crosshand_theta,\
-                                                img_pol.freqs,\
-                                                db_key,\
-                                                inplace=True)
+            if len(caltables)==0:
+                logging.info(f"No caltable found for band {band}")   
+                continue
             
-        write_to_database(img_pol.freqs,img_pol.crosshand_theta,img_pol.leakage, db_key,database)           
-                
-                
-    
+            if len(caltables)>1:
+                logging.warning(f"More than one caltable found for the frequency band {band}. Correcting all")
+            tables+=caltables
+        
+        apply_crosshand_phase_from_database(caltables,database,db_key)
+        
     return img_pol.freqs,img_pol.crosshand_theta, img_pol.leakage,\
             leakage_figname,crosshand_figname
+
+def apply_crosshand_phase_from_database(caltables,crosshand_database,db_key):
+    with h5py.File(crosshand_database,'r') as hf:
+        crosshand_theta=np.array(hf[os.path.join(db_key,'crosshand_phase')])
+        freqs=np.array(hf[os.path.join(db_key,'freqs_MHz')])
+    
+    apply_crosshand_phase_on_caltables(caltables,crosshand_theta,\
+                                                freqs,\
+                                                db_key,\
+                                                inplace=True)
+    return    
 
 def write_to_database(freqs,crosshand_theta,leakage,db_key,database,overwrite=False):
     '''
@@ -467,7 +488,7 @@ def write_to_database(freqs,crosshand_theta,leakage,db_key,database,overwrite=Fa
             
         hf_time=hfdb[key]
         hf_time.create_dataset('crosshand_phase',data=crosshand_theta)
-        hf_time.create_dataset('freqs',data=freqs)
+        hf_time.create_dataset('freqs_MHz',data=freqs)
         hf_time.create_dataset('Q_leakage',data=leakage[1,:])
         hf_time.create_dataset('U_leakage',data=leakage[2,:])
         hf_time.create_dataset('V_leakage',data=leakage[3,:])
