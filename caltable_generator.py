@@ -751,8 +751,8 @@ def gen_multitime_caltable(starttime, endtime, refant='202',uvrange='>10lambda,<
                              ):
         
     '''
-    :param starttime: Astropy time object specifying the starttime of calibration
-    :param endtime: Astropy time object specifying endtime
+    :param starttime: Timestr specifying the starttime of calibration. Format: isot
+    :param endtime: Timestr specifying endtime. Format: isot
     :param workdir: Working directory. All MSfiles will be stored here, with a folder for 
                     each frequency band. Deafult is current directory.
     :param bands: Frequency bands for which caltables should be generated. Default is all bands.
@@ -801,6 +801,10 @@ def gen_multitime_caltable(starttime, endtime, refant='202',uvrange='>10lambda,<
                 os.mkdir(copydir)
 
             os.chdir(copydir)
+            
+            starttime=Time(starttime,format='isot')
+            endtime=Time(endtime,format='isot')
+            
             data_downloader.download_timerange(starttime,endtime,download_interval='10s',destination=copydir,bands=[band])
             #msfiles=glob.glob(os.path.join(basedir,band,'2025-07-07/08/*.ms'))
             
