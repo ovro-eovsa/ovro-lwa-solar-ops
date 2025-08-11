@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=solarpipedaily
 #SBATCH --partition=solar
-#SBATCH --ntasks=10
-#SBATCH --cpus-per-task=16
+#SBATCH --ntasks=10 #10
+#SBATCH --cpus-per-task=20
 #SBATCH --distribution=cyclic
 #SBATCH --nodelist=lwacalim[05-09]
-#SBATCH --mem=160G
+#SBATCH --mem=195G
 #SBATCH --time=16:00:00
 #SBATCH --output=/lustre/solarpipe/slurmlog/%j.out
 #SBATCH --error=/lustre/solarpipe/slurmlog/%j.err
@@ -14,7 +14,7 @@
 
 ######## SBATCH --ntasks-per-node=2
 
-DIRSOFT=/lustre/peijin/ovro-lwa-solar-ops/
+DIRSOFT=/opt/devel/peijin/ovro-lwa-solar-ops/
 DIRRUN=/lustre/peijin/testslurm/ # for no realtime test
 DIR_PY_ENV=/opt/devel/peijin/solarenv    #/opt/devel/bin.chen/envs/suncasa/
 #DIR_PY_ENV=/opt/devel/msurajit/envs/my_suncasa_env    #/opt/devel/bin.chen/envs/suncasa/
@@ -27,21 +27,28 @@ conda activate $DIR_PY_ENV
 # add DIRSOFT to the python path
 export PYTHONPATH=$DIRSOFT:$PYTHONPATH
 
-cd /lustre/solarpipe/
+cd /fast/solarpipe/realtime_pipeline/proc/
 
 # clear cache before run
 if [ "$CLEAR_CACHE_BEFORE_RUN" = "True" ]; then
     echo "Clearing cache before run"
     rm -rf /dev/shm/srtmp/*
+    rm -rf /fast/solarpipe/realtime_pipeline/proc/*
+    #find /dev/shm -maxdepth 1 -name '__KMP_REGISTERED_LIB_*' -delete 2>/dev/null
 fi
+
+#/dev/shm/srtmp/
+#save_selfcaltab
 
 #--bands 23MHz 27MHz 32MHz 36MHz 41MHz 46MHz 50MHz 55MHz 59MHz 64MHz 69MHz 73MHz 78MHz 82MHz \            
 # run according to the case:
 case "$1" in
     slow)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-        --briggs -0.5 --slowfast slow --interval 200 --delay 180 --save_allsky \
-        --no_refracorr --slurm_kill_after_sunset --keep_working_fits --save_selfcaltab
+        --briggs -0.5 --slowfast slow --interval 300 --delay 180  \
+        --proc_dir  /fast/solarpipe/realtime_pipeline/proc/ \
+        --proc_dir_mem  /dev/shm/srtmp/  \
+        --no_refracorr --slurm_kill_after_sunset --alt_limit 15
         ;;
     fast)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
@@ -50,7 +57,9 @@ case "$1" in
     slownorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
             --briggs -0.5 --slowfast slow --interval 100 --delay 180 --no_refracorr --alt_limit 0 \
-            --start_time 2025-05-11T14:30:00 --end_time 2025-05-12T01:30:00 --save_selfcaltab
+            --proc_dir  /dev/shm/srtmp/proc/ \
+            --proc_dir_mem  /dev/shm/srtmp/   \
+            --start_time 2025-07-23T19:20:00 --end_time 2025-07-23T20:10:00 # --save_selfcaltab
         ;;   
     slownorealtimecostumizeddir)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py  \
