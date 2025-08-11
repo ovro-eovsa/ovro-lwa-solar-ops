@@ -372,7 +372,7 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
     import matplotlib.pyplot as plt
     
     dynamic_spectrum,freqs,tim_mjds=get_source_DS(starttime,endtime,tdt,sky_coord,proc_dir=proc_dir,\
-                                    caltable_folder=caltable_folder, freq_avg=freq_avg,\
+                                    caltable_folder=beam_caltable_folder, freq_avg=freq_avg,\
                                     bands=bands,caltable_prefix=caltable_prefix)
     
     img_pol=img_polcal(dynamic_spectrum=dynamic_spectrum,\
