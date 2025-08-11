@@ -421,7 +421,7 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
                                                 db_key,\
                                                 inplace=True)
             
-            write_to_database(img_pol.freqs,img_pol.crosshand_theta,img_pol.leakage, db_key,database)           
+        write_to_database(img_pol.freqs,img_pol.crosshand_theta,img_pol.leakage, db_key,database)           
                 
                 
     
