@@ -344,7 +344,7 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
                             bands=['13MHz', '18MHz', '23MHz', '27MHz', '32MHz', '36MHz', '41MHz', \
                                     '46MHz', '50MHz', '55MHz', '59MHz', '64MHz', '69MHz', '73MHz', \
                                     '78MHz', '82MHz'],\
-                            database=None,overwrite_db=False,
+                            database=None,overwrite_db=False
                             ):
     '''
     This function is the wrapper function for determining the
@@ -415,7 +415,7 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
             if len(caltables)>1:
                 logging.warning(f"More than one caltable found for the frequency band {band}. Correcting all")
             
-            db_key=starttime.isot[:10].replace('-','')
+            db_key=starttime[:10].replace('-','')
             apply_crosshand_phase_on_caltables(caltables,img_pol.crosshand_theta,\
                                                 img_pol.freqs,\
                                                 db_key,\
@@ -492,10 +492,10 @@ def apply_crosshand_phase_on_caltables(caltables,crosshand_phase,crosshand_freqs
             os.system("cp "+caltable+" "+copied_caltable)
         else:
             crosshand_applied[j]=caltable
-        crosshand_phase_applied=get_keyword(msname,"crosshand_db_key")
+        crosshand_phase_applied=utils.get_keyword(crosshand_applied[j],"crosshand_db_key")
         if not crosshand_phase_applied:
             beam_polcalib.combine_crosshand_theta_on_caltable(crosshand_applied[j],crosshand_phase,crosshand_freqs)
-            put_keyword(caltable,"crosshand_db_key",crosshand_timestr)
+            utils.put_keyword(crosshand_applied[j],"crosshand_db_key",crosshand_timestr)
         else:
             logging.error("Crosshand phase is already applied. Will not apply again.")
     return  crosshand_applied         
