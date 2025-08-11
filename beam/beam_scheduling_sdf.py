@@ -98,7 +98,8 @@ def make_solar_sdf(trange=None):
     f = open(sdf_name,'w')
     fmt_changed = False  # Flag to indicate that the schedule file format has changed (error condition)
     if 'CONFIG_FILE' in hdr_block[7]:
-        hdr_block[7] = 'CONFIG_FILE      /opt/devel/dgary/lwa_config_calim_std.yaml\n'
+        #hdr_block[7] = 'CONFIG_FILE      /opt/devel/dgary/lwa_config_calim_std.yaml\n'
+        hdr_block[7] = 'CONFIG_FILE      /opt/devel/solarpipe/env_runtime/ovro-lwa-solar-ops/beam/lwa_config_calim_std.yaml\n'
     else: fmt_changed = True
     if 'CAL_DIR' in hdr_block[8]:
         hdr_block[8] = 'CAL_DIR          /lustre/solarpipe/realtime_pipeline/caltables_beam_latest\n'
