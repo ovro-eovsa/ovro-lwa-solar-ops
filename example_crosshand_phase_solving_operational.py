@@ -11,6 +11,11 @@ t_1 is the time after which the elevation of CygA decreases below 60 degrees. Th
 the sky where the beam model is fairly well known and also the beam induced
 polarization is sufficient to detect CygA in all Stokes.
 
+There is a function in caltable_generator, which can be used to find these times
+
+time=Time('2025-08-11T10:00:00',format='isot')
+rise, set1=caltable_generator.source_riseset(cygA_coord,time,altitude_limit=60)
+
 starttime: t_0 This should be in Astropy isot format
 endtime: t_1   This should also be in Astropy isot format
 tdt: 900  This is the cadence within which data will be used
