@@ -11,6 +11,7 @@ from casatasks import applycal,ft,bandpass,flagdata,concat
 from ovrolwasolar import beam_polcalib,utils
 from ovrolwasolar.beam_polcalib import image_polcal_astronomical_source as img_polcal
 from ovrolwasolar.generate_calibrator_model import model_generation
+import h5py
 
 
 def source_riseset(skycoord, date_time,observatory='ovro', altitude_limit=15):
@@ -452,21 +453,28 @@ def write_to_database(freqs,crosshand_theta,leakage,db_key,database,overwrite=Fa
         key=db_key
         print (key)
         if key in hfdb.keys():
-            logging.warning("Time key already exists")
             if not overwrite:
+                logging.warning("Time key already exists. Exiting.")
                 return
-        else:
-            logging.info("Creating new time group")
-            hfdb.create_group(key)
+            else:
+                logging.warning("Time key exists. User wants to overwrite. Proceeding to delete the previous time key")
+                del hfdb[key]
+                
+        
+        logging.info("Creating new time group")
+        hfdb.create_group(key)
+            
             
         hf_time=hfdb[key]
         hf_time.create_dataset('crosshand_phase',data=crosshand_theta)
         hf_time.create_dataset('freqs',data=freqs)
-        hf.create_dataset('DI_leakage',data=leakage[1:,:])
+        hf_time.create_dataset('Q_leakage',data=leakage[1,:])
+        hf_time.create_dataset('U_leakage',data=leakage[2,:])
+        hf_time.create_dataset('V_leakage',data=leakage[3,:])
         logging.debug("Successfully updated database.")
     finally:
         hfdb.close()
-    self.crosshand_theta[pos]=np.nan
+
     
 def apply_crosshand_phase_on_caltables(caltables,crosshand_phase,crosshand_freqs,crosshand_timestr,inplace=False):
     '''
