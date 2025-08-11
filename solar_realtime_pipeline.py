@@ -692,18 +692,14 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
                 os.makedirs(hdf_dir1 + datedir)
     
             for str1 in ['fch','mfs']:
-                if os.path.exists(dir1 + datedir0):
-                    fits_lv_d0 = glob.glob(dir1 + datedir0 + '*'+str1+'*.fits')
+                if os.path.exists(dir1 + datedir):
+                    fits_lv_d0 = glob.glob(dir1 + datedir + '*'+str1+'*.fits')
                     fits_lv_d0.sort()
                 else:
                     fits_lv_d0=[]
-                if os.path.exists(dir1 + datedir1):
-                    fits_lv_d1 = glob.glob(dir1 + datedir1 + '*'+str1+'*.fits')
-                    fits_lv_d1.sort()
-                else:
-                    fits_lv_d1=[]
+                
                 # narrow down to all files between 13 UT and 03 UT of the second day 
-                fits_lv_all_ = fits_lv_d0 + fits_lv_d1
+                fits_lv_all_ = fits_lv_d0
                 fits_lv_all = []
 
         
@@ -717,12 +713,19 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
                         fits_lv_all.append(f)
                 
                 for img in fits_lv_all:
+                
+                    with fits.open(img) as hdu:
+                    
+                        datetimestr=hdu[0].header['DATE-OBS']
+                        datedir_path=(Time(datetimestr).datetime).strftime("%Y/%m/%d/")
+                        
+                    hdf_file=os.path.join(hdf_dir1,datedir_path,os.path.basename(img).replace('.fits','.hdf'))
+                    if os.path.isfile(hdf_file):
+                        continue
                     try:
                         correct_primary_beam_self_terms(img,pol=stokes)
-                        with fits.open(img) as hdu:
-                            datetimestr=hdu[0].header['DATE-OBS']
-                            datedir_path=(Time(datetimestr).datetime).strftime("%Y/%m/%d/")
-                        hdf_file=os.path.join(hdf_dir1,datedir_path,os.path.basename(img).replace('.fits','.hdf'))
+                        
+                        
                         print (img,hdf_file)
                         utils.compress_fits_to_h5(img, hdf_file)
                         print ("--------------hdf5 file written-------------------")
