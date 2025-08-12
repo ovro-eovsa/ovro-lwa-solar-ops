@@ -52,3 +52,19 @@ The crontab command for daily schedule.
 ```
 
 
+
+# Beam Operations
+
+The beam module handles solar beam scheduling and calibration.
+
+## Solar SDF Generation
+
+Generate solar schedule definition files (SDF) for beam observations:
+
+```python
+import beam_scheduling_sdf as bss
+
+# Generate solar SDF for 7 days
+bss.make_solar_sdf(ndays=7)
+```
+
