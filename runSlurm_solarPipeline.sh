@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=solarpipedaily
 #SBATCH --partition=solar
-#SBATCH --ntasks=10 #10
-#SBATCH --cpus-per-task=20
+#SBATCH --ntasks=15 #10
+#SBATCH --cpus-per-task=13
 #SBATCH --distribution=cyclic
 #SBATCH --nodelist=lwacalim[05-09]
-#SBATCH --mem=195G
+#SBATCH --mem=130G
 #SBATCH --time=16:00:00
 #SBATCH --output=/lustre/solarpipe/slurmlog/%j.out
 #SBATCH --error=/lustre/solarpipe/slurmlog/%j.err
@@ -56,10 +56,10 @@ case "$1" in
         ;;
     slownorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs -0.5 --slowfast slow --interval 100 --delay 180 --no_refracorr --alt_limit 0 \
-            --proc_dir  /dev/shm/srtmp/proc/ \
+            --briggs -0.5 --slowfast slow --interval 150 --delay 180 --no_refracorr --alt_limit 0 \
+            --proc_dir  /fast/solarpipe/realtime_pipeline/proc/ \
             --proc_dir_mem  /dev/shm/srtmp/   \
-            --start_time 2025-07-23T19:20:00 --end_time 2025-07-23T20:10:00 # --save_selfcaltab
+            --start_time 2025-08-05T15:50:00 --end_time 2025-08-05T18:20:00 # --save_selfcaltab
         ;;   
     slownorealtimecostumizeddir)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py  \
