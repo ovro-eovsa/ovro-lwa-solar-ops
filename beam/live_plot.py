@@ -79,11 +79,12 @@ def format_axis(ax, t, live=False):
 def continuous_live_plot(timeskip=1,freqskip=1,sfufactor=20000):
     lastfile = ''
     plt.rcParams['font.size']=14
+    try1 = False    # We are still getting new data
     while(1):
         files = glob.glob(beam_data+'*')
         files.sort()
         filename = os.path.basename(files[-1])
-        if filename == lastfile:
+        if filename == lastfile and not try1:
             # No new file, so sleep for 60 s and try again
             print('Waiting for new file')
             sleep(60)
@@ -155,7 +156,7 @@ def continuous_live_plot(timeskip=1,freqskip=1,sfufactor=20000):
                 sleep(10.)
                 # Read continuously once per minute until the file ends
                 while 1:
-                    print('Attempt to read a live file')
+                    print('Attempt to read live file',filename)
                     f = h5py.File(beam_data+filename, 'r', libver='latest', swmr=True)
                     # Read times to check for zeros
                     test = f['Observation1']['time'][::timeskip]
@@ -163,6 +164,7 @@ def continuous_live_plot(timeskip=1,freqskip=1,sfufactor=20000):
                     nonzeroidx = np.where(test['int'] != 0)[0]
                     last_idx = nonzeroidx[-1]+1
                     if last_idx > prev_idx:
+                        try1 = False    # We are still getting new data
                         print('Updating and saving latest data from the file.')
                         newdata = f['Observation1']['Tuning1']['XX'][prev_idx*timeskip:last_idx*timeskip:timeskip,::freqskip]/1e4/sfufactor  # SFU
                         ts = f['Observation1']['time'][prev_idx*timeskip:last_idx*timeskip:timeskip]
@@ -184,12 +186,19 @@ def continuous_live_plot(timeskip=1,freqskip=1,sfufactor=20000):
                         figsave(pngname)
                         sleep(60.0)
                     else:
-                        f.close()
-                        print('Reached the end of the file.')
-                        live = False
-                        format_axis(ax, start_time, live)
-                        figsave(pngname)
-                        break
+                        if not try1:
+                            # It looks like we reached the end of the file, but try one more time to be sure
+                            try1 = True
+                            print('Apparently reached the end of file',filename,'but try to read one more time.')
+                            sleep(60.0)
+                        else:
+                            f.close()
+                            print('Reached the end of the file',filename,'.')
+                            try1 = False
+                            live = False
+                            format_axis(ax, start_time, live)
+                            figsave(pngname)
+                            break
 
 def figsave(pngname):
     datstr = pngname[:8]
@@ -206,6 +215,14 @@ def figsave(pngname):
     if not os.path.exists(subday):
         os.makedirs(subday)
     plt.savefig(subday+'/'+pngname)
+    # Plot last 5 minutes of data (blank if none...)
+    ax = plt.figure(plt.get_fignums()[-1]).get_axes()[0]   # Get current figure axes
+    orig_xlim = ax.get_xlim()                        # Remember original time axis limits
+    pd_end = Time.now().plot_date
+    pd_start = pd_end - 300./86400.
+    ax.set_xlim(pd_start,pd_end)              # Zoom to last 5 minutes
+    plt.savefig(subday+'/05min_plot.png')     # Fixed filename, gets continuously overwritten
+    ax.set_xlim(orig_xlim)                    # Restore time axis
 
 if __name__ == '__main__':
     continuous_live_plot(timeskip=10, freqskip=4, sfufactor=1)
