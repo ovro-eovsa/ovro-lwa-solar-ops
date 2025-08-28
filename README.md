@@ -4,6 +4,20 @@ Scripts and codes related to operations of OVRO-LWA for solar studies
 
 # Realtime Pipeline
 
+
+## Environment
+
+```bash
+source /opt/devel/solarpipe/conda_start.sh
+conda activate lwasolarpipe
+```
+
+## directorys
+
+- src for operation code: `/opt/devel/solarpipe/operation/ovro-lwa-solar-ops`
+- caltables: `/opt/devel/solarpipe/operation/caltab`
+
+
 ## Slurm managed run
 
 

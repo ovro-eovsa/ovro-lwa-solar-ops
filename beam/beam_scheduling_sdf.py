@@ -99,10 +99,10 @@ def make_solar_sdf(trange=None):
     fmt_changed = False  # Flag to indicate that the schedule file format has changed (error condition)
     if 'CONFIG_FILE' in hdr_block[7]:
         #hdr_block[7] = 'CONFIG_FILE      /opt/devel/dgary/lwa_config_calim_std.yaml\n'
-        hdr_block[7] = 'CONFIG_FILE      /opt/devel/solarpipe/env_runtime/ovro-lwa-solar-ops/beam/lwa_config_calim_std.yaml\n'
+        hdr_block[7] = 'CONFIG_FILE      /opt/devel/solarpipe/lwa_config_calim_std.yaml\n'
     else: fmt_changed = True
     if 'CAL_DIR' in hdr_block[8]:
-        hdr_block[8] = 'CAL_DIR          /lustre/solarpipe/realtime_pipeline/caltables_beam_latest\n'
+        hdr_block[8] = 'CAL_DIR          /opt/devel/solarpipe/operation/caltab/caltables_beam_latest\n'
     else: fmt_changed = True
     for line in hdr_block:
         f.write(line)
@@ -203,8 +203,8 @@ def multiday_obs(ndays=7, startday=0, send=True):
             sleep(2)
             
 def make_sdf(source_coord,trange,beam_to_use=5, scan_duration=1800,source_name='source',\
-            integration_time=64, sdf_filename='template.sdf', config_file="/opt/devel/dgary/lwa_config_calim_std.yaml",\
-            caltable_folder='/lustre/solarpipe/realtime_pipeline/caltables_beam_latest', send=False,\
+            integration_time=64, sdf_filename='template.sdf', config_file="/opt/devel/solarpipe/lwa_config_calim_std.yaml",\
+            caltable_folder='/opt/devel/solarpipe/operation/caltab/caltables_beam_latest', send=False,\
             scandur = 60.,scangap = 1.):
     ''' Make a standard sdf file for scheduling the beam observations, where a source of given ra-dec is tracked
 

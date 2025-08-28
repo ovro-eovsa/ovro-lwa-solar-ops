@@ -148,7 +148,7 @@ xengines:
   x_dest_corr_fast_port: [11001, 11001, 11002, 11002]
   x_dest_beam_ip: ["10.41.0.76", "10.41.0.76", "10.41.0.77", "10.41.0.77", "10.41.0.78", "10.41.0.78", "10.41.0.79", "10.41.0.79"]
   x_dest_beam_port: [20001, 20002, 20001, 20002, 20001, 20002, 20001, 20002]
-  cal_directory: "/lustre/solarpipe/realtime_pipeline/caltables_beam_latest/"   # location on destination server of calibration tables
+  cal_directory: "/opt/devel/solarpipe/operation/caltab/caltables_beam_latest/"   # location on destination server of calibration tables
   # cal_directory: "/opt/devel/dgary/solar_cal/"   # location on destination server of calibration tables
   update_interval: 15  # beamformer tracking update cadence in seconds
   # Which antennas to output in the fast dump stream
