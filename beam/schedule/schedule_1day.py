@@ -1,0 +1,2 @@
+import beam_scheduling_sdf
+beam_scheduling_sdf.multiday_obs(ndays=1)
