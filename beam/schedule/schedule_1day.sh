@@ -12,7 +12,7 @@ fi
 unset __conda_setup
 # --- end conda initialize ---
 
-cd /data07/peijinz/ovro-lwa-solar-ops/beam/schedule/
+cd /opt/devel/solarpipe/operation/ovro-lwa-solar-ops/beam/schedule/
 conda activate deployment
 python schedule_1day.py
 

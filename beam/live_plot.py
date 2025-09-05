@@ -44,7 +44,7 @@ def plot_live_file(filename=None,timeskip=1,freqskip=1):
     if not live: return
     while 1:
         t1 = time()
-        f = h5py.File(beamdata+filename, 'r', libver='latest', swmr=True)
+        f = h5py.File(beam_data+filename, 'r', libver='latest', swmr=True)
         test = f['Observation1']['Tuning1']['XX'][::timeskip,0]
         try:
             last_idx = np.where(test == 0.)[0][0]

@@ -14,9 +14,8 @@
 
 ######## SBATCH --ntasks-per-node=2
 
-DIRSOFT=/opt/devel/peijin/ovro-lwa-solar-ops/
-DIRRUN=/lustre/peijin/testslurm/ # for no realtime test
-DIR_PY_ENV=/opt/devel/peijin/solarenv    #/opt/devel/bin.chen/envs/suncasa/
+DIRSOFT=/opt/devel/solarpipe/operation/ovro-lwa-solar-ops/
+DIR_PY_ENV=/opt/devel/solarpipe/envs/lwasolarpipe   #/opt/devel/bin.chen/envs/suncasa/
 #DIR_PY_ENV=/opt/devel/msurajit/envs/my_suncasa_env    #/opt/devel/bin.chen/envs/suncasa/
 CLEAR_CACHE_BEFORE_RUN=True
 
@@ -77,13 +76,6 @@ case "$1" in
         ;;
     testnodes)
         srun $DIR_PY_ENV/bin/python slurm_taskid_test.py
-        ;;
-    testnorealtime)
-        srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
-            --briggs 0.0 --slowfast slow --interval 100 --delay 180 \
-            --proc_dir /fast/peijinz/slurmtest/ --save_dir $DIRRUN/save/ \
-            --logger_dir $DIRRUN/log/ \
-            --start_time 2024-10-07T19:50:00 --end_time 2024-10-07T22:00:00
         ;;
     testslowfixedtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
