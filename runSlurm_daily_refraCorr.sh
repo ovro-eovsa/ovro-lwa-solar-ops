@@ -11,8 +11,8 @@
 #SBATCH --mail-user=pz47@njit.edu
 
 
-DIRSOFT=/opt/devel/solarpipe/envs/lwasolarpipe/
-DIR_PY_ENV=/opt/devel/bin.chen/envs/suncasa/
+DIRSOFT=/opt/devel/solarpipe/operation/ovro-lwa-solar-ops/
+DIR_PY_ENV=/opt/devel/solarpipe/envs/lwasolarpipe/
 source /home/solarpipe/.bashrc
 conda activate $DIR_PY_ENV
 
