@@ -596,8 +596,8 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
             hdf_fch_lv20 = hdf_dir_lv20 + datedir + os.path.basename(fits_fch_lv20).replace('.fits', '.hdf')
             
             
-            fits_fch_lv20=leakc.do_leakage_correction(fits_fch_lv10,leakage_database,outfile=fits_fch_lv20)
-            fits_mfs_lv20=leakc.do_leakage_correction(fits_mfs_lv10,leakage_database, outfile=fits_mfs_lv20)
+            fits_fch_lv20=leakc.get_leakage_correction_terms(fits_fch_lv10,leakage_database,outfile=fits_fch_lv20)
+            fits_mfs_lv20=leakc.get_leakage_correction_terms(fits_mfs_lv10,leakage_database, outfile=fits_mfs_lv20)
             
             #utils.compress_fits_to_h5(fits_mfs_lv20, hdf_mfs_lv20)
             #utils.compress_fits_to_h5(fits_fch_lv20, hdf_fch_lv20)
@@ -617,10 +617,10 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
                 hdf_mfs_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_mfs_lv25).replace('.fits', '.hdf')
                 hdf_fch_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_fch_lv25).replace('.fits', '.hdf')
                 
-                fits_mfs_lv25=leakc.do_leakage_correction(fits_mfs_lv15,leakage_database, outfile=fits_mfs_lv25)    
+                fits_mfs_lv25=leakc.get_leakage_correction_terms(fits_mfs_lv15,leakage_database, outfile=fits_mfs_lv25)    
                 #utils.compress_fits_to_h5(fits_mfs_lv25, hdf_mfs_lv25)
                 
-                fits_fch_lv25=leakc.do_leakage_correction(fits_fch_lv15,leakage_database, outfile=fits_fch_lv25)    
+                fits_fch_lv25=leakc.get_leakage_correction_terms(fits_fch_lv15,leakage_database, outfile=fits_fch_lv25)    
                 #utils.compress_fits_to_h5(fits_fch_lv25, hdf_fch_lv25)
                 
        
@@ -671,7 +671,7 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
     
     
     
-    logging.info("Correcting for the self-terms of the primary beam")
+    logging.info("Correcting for the primary beam Muller Matrix")
     
 
     # Note the following reorganization is only for synoptic plots and refraction csv files
@@ -723,7 +723,7 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
                     if os.path.isfile(hdf_file):
                         continue
                     try:
-                        correct_primary_beam_self_terms(img,pol=stokes)
+                        correct_primary_beam_muller(img,pol=stokes)
                         
                         
                         print (img,hdf_file)
@@ -734,7 +734,7 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
                         logging.error(e)
                         logging.error('====Processing {0:s} failed'.format(img))
             
-def correct_primary_beam_self_terms(imagename, pol='I'):
+def correct_primary_beam_muller(imagename, pol='I'):
     '''
     Can handle multiple images in a list. However if providing multiple images
     provide full name of files. No addition to filename is done.
@@ -767,8 +767,8 @@ def correct_primary_beam_self_terms(imagename, pol='I'):
         key_list.append(key)
     
     if 'BEAMCOR' in key_list:
-        logging.debug("Image already has been corrected for self-terms")
-        print ("Image already has been corrected for self-terms")
+        logging.debug("Image already has been corrected for primary beam Muller")
+        print ("Image already has been corrected for primary beam Muller")
         return
     
     
@@ -782,18 +782,23 @@ def correct_primary_beam_self_terms(imagename, pol='I'):
     
     
     freqs_db=np.arange(29,90,4) ### The highest frequency calculated with this range is 89
-    scale_db=np.zeros((4,freqs_db.size))
+    scale_db=np.zeros((freqs_db.size,4,4))
 
     for freq_db_ind,freq1 in enumerate(freqs_db):
-        pb=beam(freq=freq1)
-    
-        pb.read_beam_file()
+        if freq_db_ind==0:
+            pb=beam(freq=freq1)
+            pb.read_beam_file()    
+            primary_beam_file=os.path.basename(pb.beamfile)
+        else:
+            pb.freq=freq1
+        
         pb.srcjones(az=np.array([az]),el=np.array([alt]))
         jones_matrices=pb.get_source_pol_factors(pb.jones_matrices[0,:,:])
         muller_matrix=pb.get_muller_matrix_stokes(pb.jones_matrices[0,:,:])
         
-        for stokes_ind in range(4):
-            scale_db[stokes_ind,freq_db_ind]=muller_matrix[stokes_ind,stokes_ind].real
+        
+        scale_db[freq_db_ind,:,:]=muller_matrix.real
+    
         
     
     frequency=meta['ref_cfreqs']*1e-6
@@ -801,33 +806,58 @@ def correct_primary_beam_self_terms(imagename, pol='I'):
     
     cols=[]
     if pol=='I':
-        scale=np.expand_dims(np.interp(frequency,freqs_db,scale_db[0,:]),axis=(1,2))
+        scale=np.expand_dims(np.interp(frequency,freqs_db,scale_db[:,0,0]),axis=(1,2))
         data[0,...]=data[0,...]/scale
-        beam_self=scale.squeeze()
-        fitscol=fits.Column(name=pol+"_self",format='E',array=beam_self)  
-                    ## E stands for single precision float (32-bit). Change to D for double precision
-                    ## see https://docs.astropy.org/en/stable/io/fits/usage/table.html#column-creation
-        cols.append(fitscol)
+        
     else:
         stokes_order=meta_header['polorder']
         pols=stokes_order.split(',')
-        beam_self=np.zeros(frequency.size)
-        for j,pol in enumerate(pols):
-            muller_matrix_index=muller_matrix_order[pol]
-            scale=np.expand_dims(np.interp(frequency,freqs_db,scale_db[muller_matrix_index,:]),axis=(1,2))
-            data[j,...]=data[j,...]/scale
-            beam_self[:]=scale.squeeze()
-            print (pol+"_self")
-            fitscol=fits.Column(name=pol+"_self",format='E',array=beam_self)  
-                    ## E stands for single precision float (32-bit). Change to D for double precision
-                    ## see https://docs.astropy.org/en/stable/io/fits/usage/table.html#column-creation
-            cols.append(fitscol)
+        leak_frac={'Q_leak':np.zeros(num_freqs),'U_leak':np.zeros(num_freqs),'V_leak':np.zeros(num_freqs)}
+        leak_frac_keys=list(leak_frac.keys())
+        with fits.open(img) as hdul:
+            tb_header=hdul[1].header
+            keys=tb_header.keys()
+            for key in keys:
+                if tb_header[key] in leac_frac_keys:
+                    leak_frac[tb_header[key]]=np.array(hdul[1].data[tb_header[key]])
+                    
+        
+        muller_matrix_all_freqs=np.zeros((num_freqs,4,4))
+        
+        for elem1 in range(4):
+            for elem2 in range(4):
+                muller_matrix_all_freqs[:,elem1,elem2]=np.interp(frequency,freqs_db,scale_db[:,elem1,elem2])
+        
+        for freq_ind in range(num_freqs):
+            muller_matrix=muller_matrix_all_freqs[freq_ind,:,:]
+            #### The leakage values were corrected before any model primary beam is applied.
+            muller_matrix[1,0]=leak_frac['Q_leak']*muller_matrix[0,0]
+            muller_matrix[2,0]=leak_frac['U_leak']*muller_matrix[0,0]
+            muller_matrix[3,0]=leak_frac['V_leak']*muller_matrix[0,0]
+            
+            inverse_muller=np.linalg.inv(muller_matrix)
+            
+            stokes_data={'I':np.zeros((shape[2],shape[3])),'Q':np.zeros((shape[2],shape[3])),\
+                            'U':np.zeros((shape[2],shape[3])),'V':np.zeros((shape[2],shape[3]))}
+            for j,pol in enumerate(pols):                
+                stokes_data[pol]=np.array(data[j,freq_ind,:,:])
+                
+            for j,pol in enumerate(pols):
+                    inverse_muller_pol=inverse_muller[muller_matrix_order[pol]]                            
+                    data[j,freq_ind,:,:]=stokes_data['I']*inverse_muller_pol[0]+\
+                                        stokes_data['Q']*inverse_muller_pol[1]+\
+                                        stokes_data['U']*inverse_muller_pol[2]+\
+                                        stokes_data['V']*inverse_muller_pol[3]
+            del muller_matrix,inverse_muller,stokes_data
+                    
+        
     
     header={}
     header['beamcor']=True
+    header['BEAMFILE']=primary_beam_file
             
         
-    ndfits.update(imagename,new_data=data,new_columns=cols, new_header_entries=header)
+    ndfits.update(imagename,new_data=data,new_header_entries=header)
     print ("data and headers updated")
         
 
@@ -1251,8 +1281,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     fitsfiles.sort()
                     if stokes!='I':
                         allstokes_fits=combine_pol_images(fitsfiles,stokes)
-                        for fitsimages in allstokes_fits: 
-                            utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
+                        #for fitsimages in allstokes_fits: 
+                        #    utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
                     else:
                         allstokes_fits=fitsfiles
                     
@@ -1743,7 +1773,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 print('<<',Time.now().isot,'>>','The new imaging time now passes the provided end time. Ending the pipeline.'.format(Time(time_start).isot, Time(time_end).isot))
                 
                 if stokes=='I,Q,U,V':
-                    print ("Doing leakage correction")
+                    #print ("Doing leakage correction")
                     daily_leakage_correction(date_synop,save_dir=save_dir,overwrite=False, leakage_database=leakage_database, stokes=stokes)
                 
                 daily_beam_correction(date_synop, save_dir=save_dir, overwrite=False,stokes=stokes)
@@ -1808,7 +1838,7 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                     twait = t_rise_next - Time.now() 
                     logging.info('{0:s}: Sun is setting. Done for the day. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
             if stokes=='I,Q,U,V':
-                print ("Doing leakage correction")
+                #print ("Doing leakage correction")
                 daily_leakage_correction(date_synop,save_dir=save_dir,overwrite=False, leakage_database=leakage_database,stokes=stokes)
                 
             daily_beam_correction(date_synop, save_dir=save_dir, overwrite=False,stokes=stokes)
