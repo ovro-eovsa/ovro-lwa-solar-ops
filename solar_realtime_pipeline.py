@@ -723,7 +723,10 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
                     if os.path.isfile(hdf_file):
                         continue
                     try:
-                        correct_primary_beam_muller(img,pol=stokes)
+                        if dir1 in [fits_dir_lv20,fits_dir_lv25]:
+                            correct_primary_beam_muller(img,pol=stokes, leakage_correction=True)
+                        else:
+                            correct_primary_beam_muller(img,pol=stokes, leakage_correction=False)
                         
                         
                         print (img,hdf_file)
@@ -734,7 +737,7 @@ def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/',
                         logging.error(e)
                         logging.error('====Processing {0:s} failed'.format(img))
             
-def correct_primary_beam_muller(imagename, pol='I'):
+def correct_primary_beam_muller(imagename, pol='I',leakage_correction=False):
     '''
     Can handle multiple images in a list. However if providing multiple images
     provide full name of files. No addition to filename is done.
@@ -814,12 +817,14 @@ def correct_primary_beam_muller(imagename, pol='I'):
         pols=stokes_order.split(',')
         leak_frac={'Q_leak':np.zeros(num_freqs),'U_leak':np.zeros(num_freqs),'V_leak':np.zeros(num_freqs)}
         leak_frac_keys=list(leak_frac.keys())
-        with fits.open(img) as hdul:
-            tb_header=hdul[1].header
-            keys=tb_header.keys()
-            for key in keys:
-                if tb_header[key] in leac_frac_keys:
-                    leak_frac[tb_header[key]]=np.array(hdul[1].data[tb_header[key]])
+        
+        if leakage_correction:
+            with fits.open(imagename) as hdul:
+                tb_header=hdul[1].header
+                keys=tb_header.keys()
+                for key in keys:
+                    if tb_header[key] in leac_frac_keys:
+                        leak_frac[tb_header[key]]=np.array(hdul[1].data[tb_header[key]])
                     
         
         muller_matrix_all_freqs=np.zeros((num_freqs,4,4))
@@ -831,11 +836,24 @@ def correct_primary_beam_muller(imagename, pol='I'):
         for freq_ind in range(num_freqs):
             muller_matrix=muller_matrix_all_freqs[freq_ind,:,:]
             #### The leakage values were corrected before any model primary beam is applied.
-            muller_matrix[1,0]=leak_frac['Q_leak']*muller_matrix[0,0]
-            muller_matrix[2,0]=leak_frac['U_leak']*muller_matrix[0,0]
-            muller_matrix[3,0]=leak_frac['V_leak']*muller_matrix[0,0]
             
-            inverse_muller=np.linalg.inv(muller_matrix)
+            if leakage_correction:
+                if abs(leak_frac['Q_leak'][freq_ind]-meta_header['dummyleak'])>1:
+                    muller_matrix[1,0]=leak_frac['Q_leak'][freq_ind]*muller_matrix[0,0]
+
+                if abs(leak_frac['U_leak'][freq_ind]-meta_header['dummyleak'])>1:
+                    muller_matrix[2,0]=leak_frac['U_leak'][freq_ind]*muller_matrix[0,0]
+
+                if abs(leak_frac['V_leak'][freq_ind]-meta_header['dummyleak'])>1:
+                    muller_matrix[3,0]=leak_frac['V_leak'][freq_ind]*muller_matrix[0,0]
+
+            
+            det_muller=np.linalg.det(muller_matrix)
+            if det_muller<1e-5:
+                inverse_muller=np.zeros_like(muller_matrix)
+                logging.warning("Muller matrix is not invertible. Setting inverse to 0.")
+            else:
+                inverse_muller=np.linalg.inv(muller_matrix)
             
             stokes_data={'I':np.zeros((shape[2],shape[3])),'Q':np.zeros((shape[2],shape[3])),\
                             'U':np.zeros((shape[2],shape[3])),'V':np.zeros((shape[2],shape[3]))}
