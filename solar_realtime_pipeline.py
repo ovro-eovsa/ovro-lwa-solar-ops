@@ -565,7 +565,8 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
     #### Updating the database
     for fits_fch_lv10 in fits_fch_lv10_all:
         fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
-        leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now   
+        leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now  
+
         leakc.write_to_database(fits_mfs_lv10,leak_frac,database=leakage_database)   
     
     for fits_fch_lv10 in fits_fch_lv10_all:
@@ -823,7 +824,7 @@ def correct_primary_beam_muller(imagename, pol='I',leakage_correction=False):
                 tb_header=hdul[1].header
                 keys=tb_header.keys()
                 for key in keys:
-                    if tb_header[key] in leac_frac_keys:
+                    if tb_header[key] in leak_frac_keys:
                         leak_frac[tb_header[key]]=np.array(hdul[1].data[tb_header[key]])
                     
         
@@ -838,13 +839,13 @@ def correct_primary_beam_muller(imagename, pol='I',leakage_correction=False):
             #### The leakage values were corrected before any model primary beam is applied.
             
             if leakage_correction:
-                if abs(leak_frac['Q_leak'][freq_ind]-meta_header['dummyleak'])>1:
+                if abs(leak_frac['Q_leak'][freq_ind]-head['dumyleak'])>1:
                     muller_matrix[1,0]=leak_frac['Q_leak'][freq_ind]*muller_matrix[0,0]
 
-                if abs(leak_frac['U_leak'][freq_ind]-meta_header['dummyleak'])>1:
+                if abs(leak_frac['U_leak'][freq_ind]-head['dumyleak'])>1:
                     muller_matrix[2,0]=leak_frac['U_leak'][freq_ind]*muller_matrix[0,0]
 
-                if abs(leak_frac['V_leak'][freq_ind]-meta_header['dummyleak'])>1:
+                if abs(leak_frac['V_leak'][freq_ind]-head['dumyleak'])>1:
                     muller_matrix[3,0]=leak_frac['V_leak'][freq_ind]*muller_matrix[0,0]
 
             
@@ -1299,8 +1300,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     fitsfiles.sort()
                     if stokes!='I':
                         allstokes_fits=combine_pol_images(fitsfiles,stokes)
-                        #for fitsimages in allstokes_fits: 
-                        #    utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
+                        for fitsimages in allstokes_fits: 
+                            utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
                     else:
                         allstokes_fits=fitsfiles
                     
