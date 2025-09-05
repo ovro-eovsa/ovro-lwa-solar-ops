@@ -18,6 +18,18 @@ conda activate lwasolarpipe
 - caltables: `/opt/devel/solarpipe/operation/caltab`
 
 
+
+## Update caltables
+
+```bash
+# remove old caltables
+pdsh -w lwacalim[05-09] 'rm -rf /fast/solarpipe/caltables/*'
+
+# copy new caltables
+pdsh -w lwacalim[05-09] 'cp -r /opt/devel/solarpipe/operation/caltab/caltables_latest/* /fast/solarpipe/caltables/'
+```
+
+
 ## Slurm managed run
 
 

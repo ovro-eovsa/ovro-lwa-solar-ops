@@ -11,8 +11,7 @@
 #SBATCH --mail-user=pz47@njit.edu
 
 
-DIRSOFT=/lustre/peijin/ovro-lwa-solar-ops/
-DIRRUN=/lustre/peijin/testslurm/ # for no realtime test
+DIRSOFT=/opt/devel/solarpipe/envs/lwasolarpipe/
 DIR_PY_ENV=/opt/devel/bin.chen/envs/suncasa/
 source /home/solarpipe/.bashrc
 conda activate $DIR_PY_ENV
