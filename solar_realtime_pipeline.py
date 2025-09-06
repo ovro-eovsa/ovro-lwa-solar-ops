@@ -489,16 +489,17 @@ def daily_refra_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/'
             logging.error('====Processing {0:s} failed'.format(fits_fch_lv10))
 
 def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/', \
-                                overwrite=True, slowfast='slow',\
+                                slowfast='slow',\
                                  leakage_database='/lustre/msurajit/leakage_database.db',stokes='I,Q,U,V'):
     """
-    Function for doing daily refraction corrections based on level 1 fits files produced in a given solar day
+    Function for determining the additional corrections for M_10, M_20, M_30 based on level 1 fits files
     :param date: format 'yyyy-mm-dd' or an astropy.time.Time object or an astropy.time.Time compatible string
-    :param save_dir: directory to save the data prodcuts. Need to have a substructure of lev1/yyyy/mm/dd for level 1 files, and lev15/yyyy/mm/dd for level 1.5 files
-    :param overwrite: if True, overwrite the existing level 1.5 and refraction coefficient csv file
-    :param overbright: peak brightness temperature exceeding this value (in Kelvin) will be excluded for fitting
-    :param interp: interpolation method used by scipy.interpolation.interp1d. Default to 'linear'
-    :param max_dt: maximum time difference to perform the interpolation in seconds
+    :param save_dir: directory to save the data prodcuts. Need to have a substructure of lev1/yyyy/mm/dd for level 1 files,
+                    and lev15/yyyy/mm/dd for level 1.5 files
+    :param leakage_database: The database where the determined numbers will be written.
+    :param stokes: While this can take 'I,Q,U,V' and any other combination of them. The code can accept some stokes
+                    being left, as long as I is there. However, leaving one or two stokes makes the database problematic.
+    
     """
     if isinstance(date, str):
         try:
@@ -630,15 +631,15 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
             logging.error('====Processing {0:s} failed'.format(fits_fch_lv10))
             
 def daily_beam_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline/', \
-                                overwrite=True, slowfast='slow',stokes='I'):
+                                slowfast='slow',stokes='I'):
     """
-    Function for doing daily refraction corrections based on level 1 fits files produced in a given solar day
+    Function for correcting the primary beam, along with the additional corrections determined. For level 1 and 1.5
+    images, only the model Muller Matrix will be corrected. For level 2 and 2.5 images, the correction terms to the
+    Muller Matrix terms will also be used.
     :param date: format 'yyyy-mm-dd' or an astropy.time.Time object or an astropy.time.Time compatible string
-    :param save_dir: directory to save the data prodcuts. Need to have a substructure of lev1/yyyy/mm/dd for level 1 files, and lev15/yyyy/mm/dd for level 1.5 files
-    :param overwrite: if True, overwrite the existing level 1.5 and refraction coefficient csv file
-    :param overbright: peak brightness temperature exceeding this value (in Kelvin) will be excluded for fitting
-    :param interp: interpolation method used by scipy.interpolation.interp1d. Default to 'linear'
-    :param max_dt: maximum time difference to perform the interpolation in seconds
+    :param save_dir: directory to save the data prodcuts. Need to have a substructure of lev1/yyyy/mm/dd for level 1 files,
+                    and lev15/yyyy/mm/dd for level 1.5 files. Similar numbers for level 2 and 2.5 files.
+    
     """
     if isinstance(date, str):
         try:
@@ -746,15 +747,22 @@ def correct_primary_beam_muller(imagename, pol='I',leakage_correction=False):
     Can only handle IQUV or I images. If IQUV image, first combine the IQUV images 
     using combine_IQUV_images function in utils.py
     
-    This function only corrects for the self-terms of the Muller Matrix.
+     For level 1 and 1.5
+    images, only the model Muller Matrix will be corrected. For level 2 and 2.5 images, 
+    the correction terms to the Muller Matrix terms will also be used. This is done,
+    by setting leakage_correction to False for level 1 and 1.5 images. For level 2 and 2.5
+    images, it is set to True. Note that, by default, level 1 and 1.5 images do not have
+    the correction terms written in the fitsfile. So anyway, the code will give error if
+    those columns does not exist.
     
-    [[M00     0       0   0],
-     [M10    M11      0   0],
-     [M20     0      M22  0],
-     [M30     0      0    M33] [Is,Qs,Us,Vs]=[Io,Qo,Uo,Vo]
+    [[M00     M01       M02   M03],
+     [M10    M11      M12   M13],
+     [M20     M21      M22  M23],
+     [M30     M31      M32    M33] [Is,Qs,Us,Vs]=[Io,Qo,Uo,Vo]
     Is,Qs,Us, Vs are the source Stokes parameters.
     Io,Qo,Uo,Vo are the pbserved Stokes parameters.
-    This function corrects only for M00, M11, M22 and M33.
+
+
     
     If fast_vis is true, then things need to be changed. Fast vis is not tested after 
     major modifications done on April 15, 2025
