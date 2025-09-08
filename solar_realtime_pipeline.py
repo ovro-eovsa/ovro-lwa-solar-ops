@@ -1801,9 +1801,9 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                 
                 if stokes=='I,Q,U,V':
                     #print ("Doing leakage correction")
-                    daily_leakage_correction(date_synop,save_dir=save_dir,overwrite=False, leakage_database=leakage_database, stokes=stokes)
+                    daily_leakage_correction(date_synop,save_dir=save_dir, leakage_database=leakage_database, stokes=stokes)
                 
-                daily_beam_correction(date_synop, save_dir=save_dir, overwrite=False,stokes=stokes)
+                daily_beam_correction(date_synop, save_dir=save_dir,stokes=stokes)
                 
                 
                 if slurm_kill_after_sunset:
@@ -1866,9 +1866,9 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                     logging.info('{0:s}: Sun is setting. Done for the day. Wait for {1:.1f} hours to start.'.format(socket.gethostname(), twait.value * 24.)) 
             if stokes=='I,Q,U,V':
                 #print ("Doing leakage correction")
-                daily_leakage_correction(date_synop,save_dir=save_dir,overwrite=False, leakage_database=leakage_database,stokes=stokes)
+                daily_leakage_correction(date_synop,save_dir=save_dir, leakage_database=leakage_database,stokes=stokes)
                 
-            daily_beam_correction(date_synop, save_dir=save_dir, overwrite=False,stokes=stokes)
+            daily_beam_correction(date_synop, save_dir=save_dir, stokes=stokes)
                 
             if slowfast.lower() == 'fast':
                 twait += TimeDelta(600., format='sec') 
