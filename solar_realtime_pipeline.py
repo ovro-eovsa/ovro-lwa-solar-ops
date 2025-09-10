@@ -275,7 +275,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
 
 def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, stokes='I', beam_fit_size=2, briggs=-0.5,use_jpl_ephem=False):
     blc = int(512 - 128)
-    trc = int(512 + 128 - 1)
+    trc = int(512 + 128)
     region='box [ [ {0:d}pix , {1:d}pix] , [{2:d}pix, {3:d}pix ] ]'.format(blc, blc, trc, trc)
     try:
         #msmd.open(msfile_slfcaled)
