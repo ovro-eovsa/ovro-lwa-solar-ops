@@ -564,11 +564,11 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
 
     
     #### Updating the database
-    #for fits_fch_lv10 in fits_fch_lv10_all:
-    #    fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
-    #    leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now  
+    for fits_fch_lv10 in fits_fch_lv10_all:
+        fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
+        leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now  
 
-     #   leakc.write_to_database(fits_mfs_lv10,leak_frac,database=leakage_database)   
+        leakc.write_to_database(fits_mfs_lv10,leak_frac,database=leakage_database)   
     
     for fits_fch_lv10 in fits_fch_lv10_all:
         fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
@@ -1316,11 +1316,11 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     
                     fits_images, plotted_image = compress_plot_images(allstokes_fits, btime, datedir, imagedir_allch_combined, hdf_dir, \
                                             fig_mfs_dir, stokes, fast_vis=fast_vis)
-                    print (fits_images)
+
                     add_caltb_header(fits_images,calib_file)
-                    if stokes!='I':
-                        print ("Determining leakage parameters")
-                        determine_leakage_parameters(fits_images[0],leakage_database)
+                    #if stokes!='I':
+                        #print ("Determining leakage parameters")
+                        #determine_leakage_parameters(fits_images[0],leakage_database)
                     
                     logging.info("Level 1 images plotted ok")
                     figname_to_copy=None
