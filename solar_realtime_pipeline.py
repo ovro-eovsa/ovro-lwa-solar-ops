@@ -564,11 +564,11 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
 
     
     #### Updating the database
-    for fits_fch_lv10 in fits_fch_lv10_all:
-        fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
-        leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now  
+    #for fits_fch_lv10 in fits_fch_lv10_all:
+    #    fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
+    #    leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now  
 
-        leakc.write_to_database(fits_mfs_lv10,leak_frac,database=leakage_database)   
+     #   leakc.write_to_database(fits_mfs_lv10,leak_frac,database=leakage_database)   
     
     for fits_fch_lv10 in fits_fch_lv10_all:
         fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
@@ -1308,8 +1308,8 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     fitsfiles.sort()
                     if stokes!='I':
                         allstokes_fits=combine_pol_images(fitsfiles,stokes)
-                        for fitsimages in allstokes_fits: 
-                            utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
+                        #for fitsimages in allstokes_fits: 
+                        #    utils.correct_primary_beam_leakage_from_I(fitsimages,pol=stokes)
                     else:
                         allstokes_fits=fitsfiles
                     
@@ -1317,7 +1317,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     fits_images, plotted_image = compress_plot_images(allstokes_fits, btime, datedir, imagedir_allch_combined, hdf_dir, \
                                             fig_mfs_dir, stokes, fast_vis=fast_vis)
                     
-                    
+                    determine_leakage_parameters(fits_images[0],leakage_database)
                     
                     logging.info("Level 1 images plotted ok")
                     figname_to_copy=None
@@ -1496,7 +1496,11 @@ def combine_pol_images(fitsfiles,stokes):
         
     return multi_freq_files
     
-    
+def determine_leakage_parameters(mfs_fits,leakage_database):
+    for file1 in mfs_fits:
+        leak_frac=leakc.determine_multifreq_leakage(file1) ### using only MFS images for now  
+        leakc.write_to_database(file1,leak_frac,database=leakage_database)   
+    return    
        
 
 def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined, \
