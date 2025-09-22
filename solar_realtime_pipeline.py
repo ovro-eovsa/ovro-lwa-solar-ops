@@ -566,7 +566,10 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
     #### Updating the database
     for fits_fch_lv10 in fits_fch_lv10_all:
         fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
-        leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now  
+        if os.path.isfile(fits_mfs_lv10):
+            leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now  
+        else:
+            logging.error(f"{os.path.basename(fits_mfs_lv10)} is missing")
 
         leakc.write_to_database(fits_mfs_lv10,leak_frac,database=leakage_database)   
     
