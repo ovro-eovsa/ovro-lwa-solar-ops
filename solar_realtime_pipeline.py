@@ -568,10 +568,11 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
         fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
         if os.path.isfile(fits_mfs_lv10):
             leak_frac=leakc.determine_multifreq_leakage(fits_mfs_lv10) ### using only MFS images for now  
+            leakc.write_to_database(fits_mfs_lv10,leak_frac,database=leakage_database)   
         else:
             logging.error(f"{os.path.basename(fits_mfs_lv10)} is missing")
 
-        leakc.write_to_database(fits_mfs_lv10,leak_frac,database=leakage_database)   
+        
     
     for fits_fch_lv10 in fits_fch_lv10_all:
         fits_mfs_lv10 = fits_fch_lv10.replace('fch', 'mfs')
@@ -602,7 +603,8 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
             
             
             fits_fch_lv20=leakc.get_leakage_correction_terms(fits_fch_lv10,leakage_database,outfile=fits_fch_lv20)
-            fits_mfs_lv20=leakc.get_leakage_correction_terms(fits_mfs_lv10,leakage_database, outfile=fits_mfs_lv20)
+            if os.path.isfile(fits_mfs_lv10):
+                fits_mfs_lv20=leakc.get_leakage_correction_terms(fits_mfs_lv10,leakage_database, outfile=fits_mfs_lv20)
             
             #utils.compress_fits_to_h5(fits_mfs_lv20, hdf_mfs_lv20)
             #utils.compress_fits_to_h5(fits_fch_lv20, hdf_fch_lv20)
@@ -615,14 +617,15 @@ def daily_leakage_correction(date, save_dir='/lustre/solarpipe/realtime_pipeline
             hdf_mfs_lv15 = hdf_dir_lv15 + datedir + os.path.basename(fits_mfs_lv15).replace('.fits', '.hdf')
             hdf_fch_lv15 = hdf_dir_lv15 + datedir + os.path.basename(fits_fch_lv15).replace('.fits', '.hdf')
             
-            if os.path.isfile(fits_mfs_lv15):
+            if os.path.isfile(fits_fch_lv15):
                 fits_mfs_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_mfs_lv15.replace('.lev1.5_mfs', '.lev2.5_mfs'))
                 fits_fch_lv25 = fits_dir_lv25 + datedir + os.path.basename(fits_fch_lv15.replace('.lev1.5_fch', '.lev2.5_fch'))
                 
                 hdf_mfs_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_mfs_lv25).replace('.fits', '.hdf')
                 hdf_fch_lv25 = hdf_dir_lv25 + datedir + os.path.basename(fits_fch_lv25).replace('.fits', '.hdf')
                 
-                fits_mfs_lv25=leakc.get_leakage_correction_terms(fits_mfs_lv15,leakage_database, outfile=fits_mfs_lv25)    
+                if os.path.isfile(fits_mfs_lv15):
+                    fits_mfs_lv25=leakc.get_leakage_correction_terms(fits_mfs_lv15,leakage_database, outfile=fits_mfs_lv25)    
                 #utils.compress_fits_to_h5(fits_mfs_lv25, hdf_mfs_lv25)
                 
                 fits_fch_lv25=leakc.get_leakage_correction_terms(fits_fch_lv15,leakage_database, outfile=fits_fch_lv25)    
