@@ -433,7 +433,7 @@ def crosshand_phase_solver(starttime,endtime,tdt,sky_coord,freq_avg=16,proc_dir=
                 logging.warning(f"More than one caltable found for the frequency band {band}. Correcting all")
             tables+=caltables
         
-        apply_crosshand_phase_from_database(caltables,database,db_key)
+        apply_crosshand_phase_from_database(tables,database,db_key)
         
     return img_pol.freqs,img_pol.crosshand_theta, img_pol.leakage,\
             leakage_figname,crosshand_figname
