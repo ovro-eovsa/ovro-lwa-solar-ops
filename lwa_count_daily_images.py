@@ -168,21 +168,23 @@ def scan_pasthours(nhours=24, startdate=Time.now(), base_dir='/lustre/solarpipe/
         if (timeplot < t1.datetime) and ((Time(timeplot) - t0).sec > -3600):
             nfile_pre = int((Time(timeplot) - t0).sec/cadence)
             nfile_end = int((t1 - Time(timeplot)).sec/cadence)
-            if (nfile_pre > nfile_hourly) and (nfile_end > nfile_hourly):
+            if (nfile_pre >= nfile_hourly) and (nfile_end > nfile_hourly):
                 nfile_hourly_th = nfile_hourly
-            elif (nfile_pre > nfile_hourly) and (nfile_end < nfile_hourly):
+            elif (nfile_pre >= nfile_hourly) and (nfile_end < nfile_hourly):
                 nfile_hourly_th = nfile_end
             #elif (nfile_pre < nfile_hourly) and (nfile_end > nfile_hourly):
             #    nfile_hourly_th = nfile_pre
             elif nfile_pre < 0:
                 nfile_hourly_th = nfile_pre + nfile_hourly
             #print(f'nfile_pre:{nfile_pre}, nfile_end:{nfile_end}, nfile_hourly:{nfile_hourly}, nfile_hourly_th:{nfile_hourly_th}')
+            else:
+                nfile_hourly_th = nfile_hourly
 
-            nimage_hourly_th = nfile_hourly_th * 144
         else:
             nfile_hourly_th = 0
             nimage_hourly_th = 0
             #print(f'sunset, expect {nfile_hourly_th} hourly files')
+        nimage_hourly_th = nfile_hourly_th * 144
 
         date = timeplot.date()
         hour = timeplot.hour
@@ -283,11 +285,20 @@ def make_plot(ndays=10, alltime=True, figdir='/common/webplots/lwa-data/'):
         yesterday = datetime.now() - timedelta(days=1)
 
         # Plot for the past 24 hours
+        sunrise, sunset = sun_riseset(today, altitude_limit=15)
+        if sunset.datetime > today:
+            junk, sunset_yesterday = sun_riseset(yesterday, altitude_limit=15)
+            t0 = sunset_yesterday
+            t1 = sunrise
+        else:
+            t0 = sunrise
+            t1 = sunset
         timestart = today - timedelta(hours=24)
         axs[0,0].step(hours, df_hr["Hourly Files"], where='mid', label='Actual') 
         #axs[0,0].plot(hours, df_hr["Max Hourly Files"], '--k', label='Theoretical')
         axs[0,0].step(hours, df_hr["Max Hourly Files"], where='mid', color='k', ls=':', label='Theoretical')
         axs[0,0].axvline(today.replace(minute=0, second=0, microsecond=0), color='k', ls='--')
+        axs[0,0].axvspan(t0.datetime, t1.datetime, alpha=0.5, facecolor='gray')
         axs[0,0].text(today.replace(minute=5, second=0, microsecond=0), 2, 'Hour Now', ha='left', va='bottom') 
         hr_formatter = mdates.DateFormatter('%H')
         axs[0,0].set_ylabel("Hourly # of FITS Files")
@@ -346,7 +357,7 @@ def make_plot(ndays=10, alltime=True, figdir='/common/webplots/lwa-data/'):
 
 
         # This is for all times
-        my_formatter = mdates.DateFormatter('%Y/%m')
+        my_formatter = mdates.DateFormatter('%y/%m')
         axs[1,0].step(dates, df["Daily Files"], where='mid', label='Actual') 
         #axs[0,0].plot(dates, df["Daily Files"], marker="o", fillstyle='none', linestyle='None') 
         axs[1,0].plot(dates, df["Max Daily Files"], ':k', label='Theoretical')
