@@ -263,7 +263,7 @@ def update_daily_database(ndays=7, startdate=Time.now(), filetype='fch', base_di
         print('Nothing to update')
 
 def update_hourly_database(nhours=3, startdate=Time.now(), filetype='fch', base_dir='/lustre/solarpipe/realtime_pipeline/'):
-    new_df = scan_pasthours(nhours, startdate=startdate, filetype='fch', base_dir=base_dir)
+    new_df = scan_pasthours(nhours, startdate=startdate, filetype=filetype, base_dir=base_dir)
 
     if not new_df.empty:
         # Load existing CSV if exists
