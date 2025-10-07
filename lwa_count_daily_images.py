@@ -242,7 +242,7 @@ def scan_pasthours(nhours=24, startdate=Time.now(), base_dir='/lustre/solarpipe/
         return pd.DataFrame() 
 
 def update_daily_database(ndays=7, startdate=Time.now(), filetype='fch', base_dir='/nas7/ovro-lwa-data/hdf/slow/lev1/'):
-    new_df = scan_pastdays(ndays, startdate=startdate, filetype='fch', base_dir=base_dir)
+    new_df = scan_pastdays(ndays, startdate=startdate, filetype=filetype, base_dir=base_dir)
 
     if not new_df.empty:
         # Load existing CSV if exists
