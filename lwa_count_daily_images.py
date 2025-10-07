@@ -132,10 +132,15 @@ def scan_pastdays(ndays=7, startdate=Time.now(), base_dir='/nas7/ovro-lwa-data/h
             tot_file_count += file_count
             tot_image_count += image_count
 
-    print(f'Total: {tot_file_count} files, {tot_image_count} images')
-    df = pd.DataFrame(data, columns=["Date", "Daily Files", "Daily Images", "Max Daily Files", "Max Daily Images"])
-    df = df.sort_values("Date", ascending=False)
-    return df
+    if len(data) > 0:
+        print(f'Total: {tot_file_count} files, {tot_image_count} images')
+        df = pd.DataFrame(data, columns=["Date", "Daily Files", "Daily Images", "Max Daily Files", "Max Daily Images"])
+        df = df.sort_values("Date", ascending=False)
+        return df
+    else:
+        print('No new data generated')
+        return pd.DataFrame()
+        
 
 
 def scan_pasthours(nhours=24, startdate=Time.now(), base_dir='/lustre/solarpipe/realtime_pipeline/', 
@@ -228,45 +233,55 @@ def scan_pasthours(nhours=24, startdate=Time.now(), base_dir='/lustre/solarpipe/
             tot_image_count += image_count
 
     print(f'Total: {tot_file_count} files, {tot_image_count} images')
-    df = pd.DataFrame(data, columns=["Hour", "Hourly Files", "Hourly Images", "Max Hourly Files", "Max Hourly Images"])
-    df = df.sort_values("Hour", ascending=False)
-    return df
+    if len(data) > 0:
+        df = pd.DataFrame(data, columns=["Hour", "Hourly Files", "Hourly Images", "Max Hourly Files", "Max Hourly Images"])
+        df = df.sort_values("Hour", ascending=False)
+        return df
+    else:
+        print('No new data generated')
+        return pd.DataFrame() 
 
 def update_daily_database(ndays=7, startdate=Time.now(), filetype='fch', base_dir='/nas7/ovro-lwa-data/hdf/slow/lev1/'):
     new_df = scan_pastdays(ndays, startdate=startdate, filetype='fch', base_dir=base_dir)
 
-    # Load existing CSV if exists
-    if os.path.exists(CSV_FILE):
-        df = pd.read_csv(CSV_FILE)
+    if not new_df.empty:
+        # Load existing CSV if exists
+        if os.path.exists(CSV_FILE):
+            df = pd.read_csv(CSV_FILE)
+        else:
+            df = new_df
+
+        # Merge: keep all old rows, update rows that overlap
+        df = pd.concat([df[~df["Date"].isin(new_df["Date"])], new_df], ignore_index=True)
+
+        # Sort by date (optional)
+        df = df.sort_values("Date", ascending=False).reset_index(drop=True)
+
+        # Write back
+        df.to_csv(CSV_FILE, index=False)
     else:
-        df = new_df
-
-    # Merge: keep all old rows, update rows that overlap
-    df = pd.concat([df[~df["Date"].isin(new_df["Date"])], new_df], ignore_index=True)
-
-    # Sort by date (optional)
-    df = df.sort_values("Date", ascending=False).reset_index(drop=True)
-
-    # Write back
-    df.to_csv(CSV_FILE, index=False)
+        print('Nothing to update')
 
 def update_hourly_database(nhours=3, startdate=Time.now(), filetype='fch', base_dir='/lustre/solarpipe/realtime_pipeline/'):
     new_df = scan_pasthours(nhours, startdate=startdate, filetype='fch', base_dir=base_dir)
 
-    # Load existing CSV if exists
-    if os.path.exists(CSV_FILE_HOURLY):
-        df = pd.read_csv(CSV_FILE_HOURLY)
+    if not new_df.empty:
+        # Load existing CSV if exists
+        if os.path.exists(CSV_FILE_HOURLY):
+            df = pd.read_csv(CSV_FILE_HOURLY)
+        else:
+            df = new_df
+
+        # Merge: keep all old rows, update rows that overlap
+        df = pd.concat([df[~df["Hour"].isin(new_df["Hour"])], new_df], ignore_index=True)
+
+        # Sort by date (optional)
+        df = df.sort_values("Hour", ascending=False).reset_index(drop=True)
+
+        # Write back
+        df.to_csv(CSV_FILE_HOURLY, index=False)
     else:
-        df = new_df
-
-    # Merge: keep all old rows, update rows that overlap
-    df = pd.concat([df[~df["Hour"].isin(new_df["Hour"])], new_df], ignore_index=True)
-
-    # Sort by date (optional)
-    df = df.sort_values("Hour", ascending=False).reset_index(drop=True)
-
-    # Write back
-    df.to_csv(CSV_FILE_HOURLY, index=False)
+        print('Nothing to update')
 
 def make_plot(ndays=10, alltime=True, figdir='/common/webplots/lwa-data/'):
     df = pd.read_csv(CSV_FILE)
@@ -276,23 +291,23 @@ def make_plot(ndays=10, alltime=True, figdir='/common/webplots/lwa-data/'):
 
     df_hr = pd.read_csv(CSV_FILE_HOURLY)
     hours = [Time(t).datetime for t in df_hr['Hour']]
+    today = datetime.now() 
+    yesterday = datetime.now() - timedelta(days=1)
+
+    # Plot for the past 24 hours
+    sunrise, sunset = sun_riseset(today, altitude_limit=15)
+    if sunset.datetime > today:
+        junk, sunset_yesterday = sun_riseset(yesterday, altitude_limit=15)
+        t0 = sunset_yesterday
+        t1 = sunrise
+    else:
+        t0 = sunrise
+        t1 = sunset
+
     if alltime:
         figname = figdir + 'slow_image_number_all'
         # This is for all time
         fig, axs = plt.subplots(2, 2, figsize=(12, 8))
-
-        today = datetime.now() 
-        yesterday = datetime.now() - timedelta(days=1)
-
-        # Plot for the past 24 hours
-        sunrise, sunset = sun_riseset(today, altitude_limit=15)
-        if sunset.datetime > today:
-            junk, sunset_yesterday = sun_riseset(yesterday, altitude_limit=15)
-            t0 = sunset_yesterday
-            t1 = sunrise
-        else:
-            t0 = sunrise
-            t1 = sunset
         timestart = today - timedelta(hours=24)
         axs[0,0].step(hours, df_hr["Hourly Files"], where='mid', label='Actual') 
         #axs[0,0].plot(hours, df_hr["Max Hourly Files"], '--k', label='Theoretical')
@@ -361,7 +376,8 @@ def make_plot(ndays=10, alltime=True, figdir='/common/webplots/lwa-data/'):
         axs[1,0].step(dates, df["Daily Files"], where='mid', label='Actual') 
         #axs[0,0].plot(dates, df["Daily Files"], marker="o", fillstyle='none', linestyle='None') 
         axs[1,0].plot(dates, df["Max Daily Files"], ':k', label='Theoretical')
-        axs[1,0].text(0.98, 0.02, '{0:d} in total'.format(tot_files), 
+        props = dict(boxstyle='square', facecolor='lightblue', alpha=0.5)
+        axs[1,0].text(0.98, 0.02, '{0:d} in total'.format(tot_files), bbox=props, 
                 transform=axs[1,0].transAxes, ha='right', va='bottom', fontsize=12)
         #plt.ylim(0, 13.9)
         axs[1,0].set_ylabel("Daily # of Files")
@@ -376,7 +392,7 @@ def make_plot(ndays=10, alltime=True, figdir='/common/webplots/lwa-data/'):
         #axs[0,1].plot(dates, df["Daily Images"], marker="o", fillstyle='none', linestyle='None')
         axs[1,1].plot(dates, df["Max Daily Images"], ':k', label='Theoretical')
         axs[1,1].axhline(y=60000, color='orange', linestyle='-', lw=1., label='SDO/AIA (all bands)')
-        axs[1,1].text(0.98, 0.02, '{0:.1f} M in total'.format(tot_images/1e6), 
+        axs[1,1].text(0.98, 0.02, '{0:.1f} M in total'.format(tot_images/1e6), bbox=props,
                 transform=axs[1,1].transAxes, ha='right', va='bottom', fontsize=12)
         #plt.ylim(0, 13.9)
         axs[1,1].set_ylabel("Daily # of Images")
@@ -391,12 +407,11 @@ def make_plot(ndays=10, alltime=True, figdir='/common/webplots/lwa-data/'):
         figname = figdir + 'slow_image_number'
         fig, ax = plt.subplots(1, 1, figsize=(6.5, 4))
         # This is for the past 24 hours 
-        today = datetime.now() 
-        yesterday = datetime.now() - timedelta(days=1)
         timestart = today - timedelta(hours=24)
         ax.step(hours, df_hr["Hourly Files"], where='mid', label='Actual') 
         ax.step(hours, df_hr["Max Hourly Files"], where='mid', color='k', ls=':', label='Theoretical')
         ax.axvline(today.replace(minute=0, second=0, microsecond=0), color='k', ls='--')
+        ax.axvspan(t0.datetime, t1.datetime, alpha=0.5, facecolor='gray')
         ax.text(today.replace(minute=5, second=0, microsecond=0), 2, 'Hour Now', ha='left', va='bottom') 
         hr_formatter = mdates.DateFormatter('%H')
         ax.set_ylabel("Hourly # of FITS Files")
