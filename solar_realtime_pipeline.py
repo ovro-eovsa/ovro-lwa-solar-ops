@@ -1157,7 +1157,6 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             else:
                 logging.debug('Calibration for certain bands is incomplete in {0:.1f} s'.format(timeout))
                 logging.debug('Proceed anyway')
-                
             
             allsky_fitsfiles=[]
             for file1 in msfiles0_name:
@@ -1460,7 +1459,6 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
     else:
         logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
         logging.debug('Proceed anyway')
-                
     return fitsfiles
 
 def combine_pol_images(fitsfiles,stokes):
