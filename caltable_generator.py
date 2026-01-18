@@ -313,7 +313,7 @@ def create_waterfall_plot(caltables,msnames,figname,num_chan=192,num_ant=352):
     
     return
 
-def flag_outrigger(dataset, ref_ms):
+def flag_outrigger(dataset):
     '''
     dataset: can be a MS or caltable
     ref_MS: MS from which the antenna names will be read
@@ -323,7 +323,7 @@ def flag_outrigger(dataset, ref_ms):
     function will give wrong results.
     '''
     tb=table()
-    core_ant_ids, exp_ant_ids = flagging.get_antids(ref_ms)
+    exp_ant_ids = utils.exp_ant_ids
     tb.open(dataset,nomodify=False)
     try:
         flag=tb.getcol('FLAG')
@@ -672,7 +672,7 @@ def get_IQUV(msname,sky_coord):
     ionospheric refraction is high.
     
     '''
-    flag_outrigger(msname,msname)
+    flag_outrigger(msname)
     os.system("chgcentre " + msname + " " + sky_coord)
     
     datacolumn='DATA'
@@ -859,7 +859,7 @@ def gen_multitime_caltable(starttime, endtime, refant='202',uvrange='>10lambda,<
             if flag_outrigger_antenna:
                 bcaltb_bm = os.path.join(beam_caltable_dir,os.path.basename(bcaltb))
                 os.system('cp -r ' + bcaltb + ' ' + bcaltb_bm)
-                flag_outrigger(bcaltb_bm,ms_str)
+                flag_outrigger(bcaltb_bm)
                 bcaltbs_bm.append(bcaltb_bm)
 
         except Exception as e:
