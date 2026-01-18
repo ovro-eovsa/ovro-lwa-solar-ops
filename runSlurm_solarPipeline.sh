@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=13
 #SBATCH --distribution=cyclic
 #SBATCH --nodelist=lwacalim[05-09]
-#SBATCH --mem=130G
+#SBATCH --mem=399999M
 #SBATCH --time=16:00:00
 #SBATCH --output=/lustre/solarpipe/slurmlog/%j.out
 #SBATCH --error=/lustre/solarpipe/slurmlog/%j.err
@@ -39,14 +39,14 @@ fi
 #/dev/shm/srtmp/
 #save_selfcaltab
 
-#--bands 23MHz 27MHz 32MHz 36MHz 41MHz 46MHz 50MHz 55MHz 59MHz 64MHz 69MHz 73MHz 78MHz 82MHz \            
+#--bands 18MHz 23MHz 27MHz 32MHz 36MHz 41MHz 46MHz 50MHz 55MHz 59MHz 64MHz 69MHz 73MHz 78MHz 82MHz \            
 # run according to the case:
 case "$1" in
     slow)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
         --briggs -0.5 --slowfast slow --interval 300 --delay 180  \
         --proc_dir  /fast/solarpipe/realtime_pipeline/proc/ \
-        --proc_dir_mem  /dev/shm/srtmp/  \
+        --proc_dir_mem  /fast/solarpipe/realtime_pipeline/procmem/  \
         --no_refracorr --slurm_kill_after_sunset --alt_limit 15
         ;;
     fast)
@@ -56,9 +56,10 @@ case "$1" in
     slownorealtime)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py \
             --briggs -0.5 --slowfast slow --interval 150 --delay 180 --no_refracorr --alt_limit 0 \
-            --proc_dir  /fast/solarpipe/realtime_pipeline/proc/ \
+            --bands 23MHz 27MHz 32MHz 36MHz 41MHz 46MHz 50MHz 55MHz 59MHz 64MHz 69MHz 73MHz 78MHz 82MHz \
+	    --proc_dir  /fast/solarpipe/realtime_pipeline/proc/ \
             --proc_dir_mem  /dev/shm/srtmp/   \
-            --start_time 2025-08-05T15:50:00 --end_time 2025-08-05T18:20:00 # --save_selfcaltab
+            --start_time 2026-01-03T17:23:55 --end_time 2026-01-03T17:54:50 --save_selfcaltab
         ;;   
     slownorealtimecostumizeddir)
         srun $DIR_PY_ENV/bin/python $DIRSOFT/solar_realtime_pipeline.py  \

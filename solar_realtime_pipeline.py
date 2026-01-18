@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import os, sys, glob, getopt
+import os, sys, glob
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -8,33 +8,23 @@ from signal import signal, SIGPIPE, SIG_DFL
 signal(SIGPIPE,SIG_DFL)
 from ovrolwasolar import solar_pipeline as sp
 from ovrolwasolar.primary_beam import jones_beam as beam
-from ovrolwasolar import utils, calibration, flagging
+from ovrolwasolar import utils, calibration
 from ovrolwasolar import leakage_correction as leakc
-from casatasks import clearcal, applycal, flagdata, tclean, exportfits, imsubimage, split
+from casatasks import flagdata, split
 from casatools import msmetadata, quanta, measures, table
-from suncasa.utils import helioimage2fits as hf
 from suncasa.io import ndfits
 from astropy.io import fits
-from ovrolwasolar import file_handler
 import logging
 import timeit
 import multiprocessing
-from multiprocessing import TimeoutError
 from astropy.time import Time, TimeDelta
-import astropy.units as u
-from sunpy.coordinates import frames
-from astropy.coordinates import SkyCoord, EarthLocation, get_body, AltAz
+from astropy.coordinates import EarthLocation, get_body, AltAz
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 import matplotlib
-from suncasa.utils import plot_mapX as pmX
-import sunpy.map as smap
 import shlex, subprocess
 from functools import partial
 from time import sleep
-import socket,glob
-from matplotlib.patches import Ellipse
+import socket
 import argparse
 import pandas as pd
 import resource
@@ -168,6 +158,7 @@ def check_fast_ms(msname):
 
 def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=0, slowfast='slow',
                 num_apcal=1, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
+                refant='202',
                 flagdir=None, delete_allsky=False, actively_rm_ms=True, stokes='I', manual_flagging_ants=None):
     
     try:
@@ -232,6 +223,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         try:
             outms, tmp = sp.image_ms_quick(msfile, calib_ms=None, bcal=bcal_table, do_selfcal=do_selfcal,\
                                         imagename=imagename, logging_level='info', \
+                                        refant=refant, \
                                         num_phase_cal=num_phase_cal, num_apcal=num_apcal,
                                         logfile=logger_file, caltable_folder=caltable_folder, \
                                         do_final_imaging=False, do_fluxscaling=False, freqbin=1, \
@@ -260,6 +252,7 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
         try:
             outms, tmp = sp.image_ms_quick(msfile, calib_ms=msfile_cal, do_selfcal=do_selfcal, imagename=imagename, logging_level='info', 
                         num_phase_cal=num_phase_cal, num_apcal=num_apcal,
+                        refant=refant,
                         logfile=logger_file, caltable_folder=caltable_folder, do_final_imaging=False, 
                         do_fluxscaling=False, freqbin=1, delete_allsky=delete_allsky, use_selfcal_img_to_subtract=True)
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
@@ -900,6 +893,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             proc_dir_mem = '/dev/shm/srtmp/', proc_dir ='/dev/shm/srtmp/',# '/fast/solarpipe/realtime_pipeline/',
             save_dir = '/lustre/solarpipe/realtime_pipeline/',
             calib_dir = '/fast/solarpipe/caltables/',
+            refant='283',
             calib_file = '20240117_145752',
             delete_working_ms=True, delete_working_fits=True, do_refra=True, overbright=2e6, save_selfcaltab=False,
             slowfast='slow', do_imaging=True, delete_allsky=False, save_allsky=False,
@@ -1141,6 +1135,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
 
             #result = pool.map_async(run_calib, msfiles)
             run_calib_partial = partial(run_calib, msfiles_cal=msfiles_cal, bcal_tables=bcal_tables, do_selfcal=do_selfcal, 
+                    refant=refant,
                     num_phase_cal=num_phase_cal, num_apcal=num_apcal, logger_file=logger_file, caltable_folder=gaintable_folder, 
                     visdir_slfcaled=visdir_slfcaled, flagdir=flagdir, delete_allsky=delete_allsky, actively_rm_ms=actively_rm_ms,
                     stokes=stokes)
@@ -1648,7 +1643,6 @@ def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir
 import os
 import time
 import shutil
-from datetime import datetime
 
 def remove_old_items(directory=".", minutes=45):
     """
@@ -1769,6 +1763,10 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
         format='%(asctime)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
         level=logger_level,
         datefmt='%Y-%m-%d %H:%M:%S', force=True)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('PIL.PngImagePlugin').setLevel(logging.WARNING)
 
     logging.info('{0:s}: I am asked to start imaging for {1:s}'.format(socket.gethostname(), time_start.isot))
     if multinode:
@@ -1920,6 +1918,10 @@ def run_pipeline(time_start=Time.now(), time_end=None, time_interval=600., delay
                     format='%(asctime)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
                     level=logger_level,
                     datefmt='%Y-%m-%d %H:%M:%S', force=True)
+                logging.getLogger('matplotlib').setLevel(logging.WARNING)
+                logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+                logging.getLogger('PIL').setLevel(logging.WARNING)
+                logging.getLogger('PIL.PngImagePlugin').setLevel(logging.WARNING)
 
                 if twait.sec > 0:
                     sleep(twait.sec + 60. + delay_by_node) 
