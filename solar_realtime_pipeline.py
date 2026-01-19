@@ -5,11 +5,6 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
-# for debug purpose, import from /fast/peijinz/pipedev/ovro-lwa-solar
-
-sys.path.insert(0, '/fast/peijinz/pipedev/ovro-lwa-solar')
-
-
 from signal import signal, SIGPIPE, SIG_DFL
 signal(SIGPIPE,SIG_DFL)
 from ovrolwasolar import solar_pipeline as sp
@@ -164,7 +159,7 @@ def check_fast_ms(msname):
 
 def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_phase_cal=0, slowfast='slow',
                 num_apcal=1, caltable_folder=None, logger_file=None, visdir_slfcaled=None, 
-                refant='202',
+                refant='283',
                 flagdir=None, delete_allsky=False, actively_rm_ms=True, stokes='I', manual_flagging_ants=None):
     
     try:
