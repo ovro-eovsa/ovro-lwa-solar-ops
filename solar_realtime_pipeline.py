@@ -4,6 +4,12 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+# for debug purpose, import from /fast/peijinz/pipedev/ovro-lwa-solar
+
+sys.path.insert(0, '/fast/peijinz/pipedev/ovro-lwa-solar')
+
+
 from signal import signal, SIGPIPE, SIG_DFL
 signal(SIGPIPE,SIG_DFL)
 from ovrolwasolar import solar_pipeline as sp
@@ -236,8 +242,10 @@ def run_calib(msfile, msfiles_cal=None, bcal_tables=None, do_selfcal=True, num_p
             os.system('cp -r '+ outms + ' ' + visdir_slfcaled + '/')
             if actively_rm_ms:
                 os.system('rm -rf ' + outms)
+            
             if os.path.exists(msfile.replace('.ms', '.badants')):
-                os.system('cp '+ msfile.replace('.ms', '.badants') + ' ' + flagdir + '/')
+                os.system('cp '+ msfile.replace('.ms', '.badants') + ' ' + visdir_slfcaled + '/' + os.path.basename(outms).replace('.ms', '.badants'))
+
             msfile_slfcaled = visdir_slfcaled + '/' + os.path.basename(outms)
             return msfile_slfcaled
         except Exception as e:
@@ -298,19 +306,16 @@ def run_imager(msfile_slfcaled, imagedir_allch=None, ephem=None, nch_out=12, sto
         if not os.path.exists(imagedir_allch):
             os.makedirs(imagedir_allch)
 
-        logging.info('Imaging {0:s} with {1:s}'.format(msfile_slfcaled, helio_imagename))
+        logging.info('Imaging {0:s} with {1:s} (nch_out: {2:d})'.format(msfile_slfcaled, helio_imagename, nch_out))
         
         default_wscleancmd = "wsclean -j 2 -mem 4 -quiet -no-reorder -no-dirty -no-update-model-required -horizon-mask 5deg -size 1024 1024 -scale 1.5arcmin -weight briggs " + str(briggs) + " -minuv-l 10 -auto-threshold 3 -name " + helio_imagename + " -niter 10000 -mgain 0.8 -beam-fitting-size " + str(beam_fit_size) + " -pol " + stokes
 
-        logging.info('nch_out: {0:d}'.format(nch_out))
         if nch_out>1:
             # default to be used for slow visibility imaging for fine channel imaging
             default_wscleancmd += " -join-channels -channels-out " + str(nch_out)
         
         cmd= shlex.split(default_wscleancmd + ' ' + msfile_slfcaled)
-
         wsclean_proc=subprocess.run(cmd)
-
 
         outfits = glob.glob(helio_imagename + '*-image.fits')
         outfits.sort()
@@ -968,6 +973,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
     allsky_dir = save_dir + '/allsky/' 
     allsky_dir_fits = allsky_dir + 'fits/'
     allsky_dir_figs = allsky_dir + 'figs/'
+    badants_arr=None
 
     ## Night-time MS files used for calibration ##
     msfiles_cal = glob.glob(visdir_calib + calib_file + '_*MHz.ms')
@@ -1239,7 +1245,7 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
             if do_imaging:
                 #if fast_vis:
                 #    nch_out=1
-                fitsfiles=image_times(msfiles_slfcaled,imagedir_allch, nch_out=nch_out, \
+                fitsfiles, badants_arr = image_times(msfiles_slfcaled,imagedir_allch, nch_out=nch_out, \
                                    stokes=stokes, beam_fit_size=beam_fit_size, briggs=briggs)
             btime = Time(trange['begin']['m0']['value'], format='mjd')
 
@@ -1313,9 +1319,9 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                     else:
                         allstokes_fits=fitsfiles
                     
-                    
+                    print('badants_arr: ', badants_arr)
                     fits_images, plotted_image = compress_plot_images(allstokes_fits, btime, datedir, imagedir_allch_combined, hdf_dir, \
-                                            fig_mfs_dir, stokes, fast_vis=fast_vis)
+                                            fig_mfs_dir, stokes, fast_vis=fast_vis, badants_arr=badants_arr)
 
                     add_caltb_header(fits_images,calib_file)
                     #if stokes!='I':
@@ -1452,9 +1458,16 @@ def image_times(msfiles_slfcaled, imagedir_allch, nch_out=12, stokes='I', beam_f
         time_img2 = timeit.default_timer()
         logging.debug('Imaging for all {0:d} bands is done in {1:.1f} s'.format(len(msfiles_slfcaled_success), time_img2-time_img1))
     else:
-        logging.debug('Imaging for certain bands is incomplete in {0:.1f} s'.format(timeout))
-        logging.debug('Proceed anyway')
-    return fitsfiles
+        logging.debug('Imaging for certain bands is incomplete in {0:.1f}s, Proceeding anyway'.format(timeout))
+    
+    badants_arr  = []
+    for ms in sorted(msfiles_slfcaled_success):
+        if os.path.exists(ms.replace('.ms', '.badants')):
+            N_badants = len(open(ms.replace('.ms', '.badants')).read().split(','))
+            # write to fits header
+            badants_arr.append(N_badants)
+    
+    return fitsfiles, badants_arr
 
 def combine_pol_images(fitsfiles,stokes):
     num_freqs=len(fitsfiles)
@@ -1511,12 +1524,12 @@ def add_caltb_header(fits_images,calib_file):
             hdul[0].header['CALTB']=calib_file
             hdul.flush()
             
+
+
             
 def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined, \
-                            hdf_dir, fig_mfs_dir, stokes, fast_vis=False):    
+                            hdf_dir, fig_mfs_dir, stokes, fast_vis=False, badants_arr=None):    
                             
-    
-        
 
     if fast_vis:
         imagename_pre = 'ovro-lwa-48'
@@ -1574,8 +1587,12 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     fitsfiles_fch.sort()
     ndfits.wrap(fitsfiles_fch, outfitsfile=fits_fch)
     
-    
-    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs,apply_fiducial_primary_beam=True)
+    if badants_arr is not None:
+        with fits.open(fits_mfs, mode='update') as hdul:
+            hdul[0].header['N_BADANTS'] = str(badants_arr)
+            hdul.flush()
+            
+    fig, axes = ovis.slow_pipeline_default_plot(fits_mfs,apply_fiducial_primary_beam=True,badants_arr=badants_arr)
     figname_lv10 = os.path.basename(fits_mfs).replace('.fits', '.png')
     fig.savefig(fig_mfs_dir_sub_lv10 + '/' + figname_lv10)
     
