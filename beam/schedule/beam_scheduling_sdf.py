@@ -56,7 +56,7 @@ def noon_radec(t=None):
     dec = sc.dec.deg+20
     return ra, dec
 
-def make_solar_sdf(trange=None):
+def make_solar_sdf(trange=None, beam_to_use=2):
     ''' Make a standard solar sdf file for scheduling the solar beam observations.
 
         trange     An astropy Time() object representing a timerange (start and stop time).
@@ -82,7 +82,7 @@ def make_solar_sdf(trange=None):
         trange = Time([max(mjd0,mjdrise),min(mjd1,mjdset)],format='mjd')
 
     # Create a template file using "lwaobserving" create command
-    blah = subprocess.run(["lwaobserving","create-sdf","--n-obs","1","--sess-mode","POWER","--beam-num","2",
+    blah = subprocess.run(["lwaobserving","create-sdf","--n-obs","1","--sess-mode","POWER","--beam-num",str(beam_to_use),
        "--obs-mode","TRK_SOL", "--obs-start", trange[0].isot[:19],"--obs-dur","1800000","--obj-name","sun",
        "--int-time","64","--do-cal","/lustre/solarpipe/solar_beam_sdfs/template.sdf"],stdout = subprocess.PIPE)
     output = blah.stdout.decode('utf-8').split('\n')
@@ -179,7 +179,7 @@ def make_solar_sdf(trange=None):
     f.close()
     return sdf_name
 
-def multiday_obs(ndays=7, startday=0, send=True):
+def multiday_obs(ndays=7, startday=0, send=True, beam_to_use=2):
     ''' Make and submit consecutive schedule (.sdf) files.
 
         Inputs:
@@ -196,7 +196,7 @@ def multiday_obs(ndays=7, startday=0, send=True):
         else:
             # On subsequent days, set start time to 12 UT (actual time will be sunrise)
             mjd = int(Time.now().mjd) + 0.5 + i
-        sdf_name = make_solar_sdf(Time(mjd,format='mjd'))
+        sdf_name = make_solar_sdf(Time(mjd,format='mjd'), beam_to_use=beam_to_use)
         if send:
             print('Submitting',sdf_name)
             os.system('lwaobserving submit-sdf '+sdf_name)
