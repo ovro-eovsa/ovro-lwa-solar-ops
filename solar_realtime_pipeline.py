@@ -1336,10 +1336,10 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
                             if do_refra:
                                 refrafile = refradir + '/refra_coeff_' + datestr_synop + '.csv'
                                 logging.info("Trying to do refraction correction")
-
                                 refra_image, success=do_refraction_correction(fits_images, overbright, \
                                                             refrafile, datedir, imagedir_allch_combined, hdf_dir, \
-                                                            fig_mfs_dir,btime)
+                                                            fig_mfs_dir,btime, badants_arr=badants_arr)
+                                logging.info('Refraction correction success: '+ str(success), "image name: "+ refra_image)
                                 if not success:
                                     logging.info('Refraction correction failed for '+ btime.isot)
                                     figname_to_copy=plotted_image
@@ -1597,7 +1597,7 @@ def compress_plot_images(fitsfiles, starttime, datedir, imagedir_allch_combined,
     #    return [fits_mfs], os.path.join(fig_mfs_dir_sub_lv10, figname_lv10)
     
 def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir_allch_combined, hdf_dir, \
-                            fig_mfs_dir, image_time):
+                            fig_mfs_dir, image_time, badants_arr=None):
     btime=image_time                        
     imagedir_allch_combined_sub_lv15 = imagedir_allch_combined + '/lev15/' + datedir
     hdf_dir_sub_lv15 = hdf_dir + '/lev15/' + datedir
@@ -1642,7 +1642,7 @@ def do_refraction_correction(fitsfiles, overbright, refrafile, datedir, imagedir
         hdf_fch_lv15 = hdf_dir_sub_lv15 + os.path.basename(fits_fch_lv15).replace('.fits', '.hdf')
         #utils.compress_fits_to_h5(fits_fch_lv15, hdf_fch_lv15)
 
-        fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15)
+        fig, axes = ovis.slow_pipeline_default_plot(fits_mfs_lv15, badants_arr=badants_arr)
         figname_lv15 = os.path.basename(fits_mfs_lv15).replace('.fits', '.png')
         fig.savefig(fig_mfs_dir_sub_lv15 + '/' + figname_lv15)
         
