@@ -6,6 +6,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 from signal import signal, SIGPIPE, SIG_DFL
+import traceback
 signal(SIGPIPE,SIG_DFL)
 from ovrolwasolar import solar_pipeline as sp
 from ovrolwasolar.primary_beam import jones_beam as beam
@@ -1387,7 +1388,13 @@ def pipeline_quick(image_time=Time.now() - TimeDelta(20., format='sec'), server=
         logging.error(e)
         os.system('rm -rf '+imagedir_allch + '*')
         time_exit = timeit.default_timer()
-        logging.error('====Processing for time {0:s} failed in {1:.1f} minutes'.format(image_time.isot, (time_exit-time_begin)/60.))
+        exc_type, exc, tb = sys.exc_info()
+        last = traceback.extract_tb(tb)[-1]  # last frame where exception occurred
+        logging.error(
+            "Error: %s at %s:%d in %s()",
+            exc, last.filename, last.lineno, last.name,
+            exc_info=True
+        )
         return False
 
 def parallel_task_runner(function_name,input_list,timeout=86400):
